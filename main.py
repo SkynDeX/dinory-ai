@@ -25,6 +25,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API 라우터 import 및 등록
+from app.api.endpoints import story_generation
+app.include_router(story_generation.router)
 
 # 루트 엔드포인트
 @app.get("/")
