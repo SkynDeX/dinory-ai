@@ -26,8 +26,9 @@ app.add_middleware(
 )
 
 # API 라우터 import 및 등록
-from app.api.endpoints import story_generation
-app.include_router(story_generation.router)
+from app.api.endpoints import story_generation, chat
+app.include_router(story_generation.router, prefix="/ai")
+app.include_router(chat.router, prefix="/api")
 
 # 루트 엔드포인트
 @app.get("/")
