@@ -1,0 +1,9 @@
+{
+  "storyId": "new_sibling",
+  "childId": 1,
+  "childName": "지우",
+  "emotion": "화남",
+  "interests": ["가족"],
+  "sceneNumber": 1,
+  "previousChoices": []
+}
