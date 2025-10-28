@@ -180,14 +180,17 @@ async def recommend_stories(req: RecommendStoriesRequest):
             svc = StorySearchService()
             items = await svc.recommend_stories_async(req.emotion, req.interests or [], req.childId, req.limit)
             logger.info(f"추천 결과 {len(items)}건")
-            return {"items": items}
+            # return {"items": items}
+            return items
+        
         logger.info("StorySearchService 없음 → 폴백 사용")
         samples = [
             {"storyId": "new_sibling", "title": "새 동생과의 하루"},
             {"storyId": "brave_little_star", "title": "작은 별의 용기"},
             {"storyId": "forest_friends", "title": "숲속 친구들"},
         ]
-        return {"items": samples[: req.limit]}
+        # return {"items": samples[: req.limit]}
+        return samples[: req.limit]
     except Exception as e:
         logger.exception("recommend-stories 실패")
         raise HTTPException(status_code=500, detail=str(e))

@@ -115,7 +115,7 @@ class StorySearchService:
         """
         출력 표준화:
         {
-          storyId, title, matchingScore, metadata
+            storyId, title, matchingScore, metadata
         }
         """
         normed = []

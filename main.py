@@ -82,12 +82,25 @@ async def on_startup():
 
 @app.get("/")
 async def root():
-    return {"message": "Dinory AI API is running", "status": "healthy"}
+    return {
+        "message": "Dinory AI API is running", 
+        "status": "healthy",
+        "version": "1.0.0"
+        }
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "service": "dinory-ai",
+        "port": os.getenv("API_PORT", "8000")
+    }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("API_PORT", 8000)), reload=True)
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=int(os.getenv("API_PORT", 8000)), 
+        reload=True
+        )
