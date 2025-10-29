@@ -309,8 +309,16 @@ class OpenAIService:
             if not scene or not scene.get('sceneNumber'):
                 scene = result
 
+            # ✅ 씬 1인 경우 storyTitle 추출하여 응답에 포함
+            response = {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
+
+            if scene_number == 1 and result.get('storyTitle'):
+                response['storyTitle'] = result.get('storyTitle')
+                logger.info(f'✅ 동화 제목 생성됨: {response["storyTitle"]}')
+
             logger.info(f'씬 {scene_number} 생성 완료: content={len(scene.get("content", ""))}자, choices={len(scene.get("choices", []))}개')
-            return {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
+            # return {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
+            return response
 
         except Exception as e:
             logger.error(f'씬 {scene_number} 생성 중 오류 발생: {e}')
@@ -382,44 +390,51 @@ class OpenAIService:
 {story_context or "첫 번째 씬입니다."}
 
 **요구사항:**
-1. '{story_title}' 이야기에 맞는 내용으로 작성
-2. 동화 줄거리({story_description})를 따르되, 이전 선택들을 반영하여 자연스럽게 분기
-3. 3개의 새로운 선택지 제공 (각기 다른 능력치)
-4. 능력치: 친절, 용기, 공감, 우정, 자존감 중 선택
-5. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 문장
-6. 주인공은 동화 속 캐릭터로, 특정 아이 이름을 사용하지 말 것
+1. {'씬 1인 경우 동화 제목도 함께 생성해주세요 (한글로, 예: "용감한 꼬마 호랑이", "마법의 숲 탐험")'  if scene_number == 1 else '이전 스토리에 이어지는 내용으로 작성'}
+2. {emotion} 감정을 다루는 따뜻한 이야기
+3. {interests_text} 요소를 포함
+4. 3개의 선택지 제공 (각기 다른 능력치)
+5. 능력치: 친절, 용기, 공감, 우정, 자존감 중 선택
+6. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 한글 문장
+7. 주인공은 동화 속 캐릭터로 설정 (특정 아이 이름 사용 금지
 
 {ending_note}
 
 **출력 형식 (JSON):**
 {{
-  "scene": {{
-    "sceneNumber": {scene_number},
-    "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
-    "imagePrompt": "DALL-E용 영어 프롬프트",
-    "choices": [
-      {{
-        "choiceId": {scene_number * 100 + 1},
-        "choiceText": "선택지 1 텍스트",
-        "abilityType": "친절/용기/공감/우정/자존감",
-        "abilityScore": 10-15
-      }},
-      {{
-        "choiceId": {scene_number * 100 + 2},
-        "choiceText": "선택지 2 텍스트",
-        "abilityType": "친절/용기/공감/우정/자존감",
-        "abilityScore": 10-15
-      }},
-      {{
-        "choiceId": {scene_number * 100 + 3},
-        "choiceText": "선택지 3 텍스트",
-        "abilityType": "친절/용기/공감/우정/자존감",
-        "abilityScore": 10-15
-      }}
-    ],
-    "isEnding": {str(is_ending).lower()}
-  }}
+    {'"storyTitle": "동화 제목 (한글, 씬 1인 경우에만)",' if scene_number == 1 else ''}
+    "scene": {{
+        "sceneNumber": {scene_number},
+        "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
+        "imagePrompt": "DALL-E용 영어 프롬프트",
+        "choices": [
+        {{
+            "choiceId": {scene_number * 100 + 1},
+            "choiceText": "선택지 1 텍스트",
+            "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+            "abilityScore": 10-15
+        }},
+        {{
+            "choiceId": {scene_number * 100 + 2},
+            "choiceText": "선택지 2 텍스트",
+            "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+            "abilityScore": 10-15
+        }},
+        {{
+            "choiceId": {scene_number * 100 + 3},
+            "choiceText": "선택지 3 텍스트",
+            "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+            "abilityScore": 10-15
+        }}
+        ],
+        "isEnding": {str(is_ending).lower()}
+    }}
 }}
+
+**중요:** 
+- 모든 텍스트는 한글로 작성
+- 동화 제목은 아이가 이해하기 쉬운 한글로 (예: "용감한 작은 토끼", "친구를 도운 꼬마 별")
+- imagePrompt만 영어로 작성
 
 씬 {scene_number}을 JSON 형식으로 생성해주세요!
 """

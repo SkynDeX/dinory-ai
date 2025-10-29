@@ -151,11 +151,22 @@ class StorySearchService:
             return self._normalize(self._get_dummy_stories(emotion, interests or [], top_k))
 
         try:
-            results = self.index.query(vector=vec, top_k=top_k, include_metadata=True)
+            # results = self.index.query(vector=vec, top_k=top_k, include_metadata=True) # 기존 코드
+            # [2025-10-29 김광현]중복이 있을 수 있으므로 top_k보다 더많은 동화 찾기(수정코드)
+            results = self.index.query(vector=vec, top_k=top_k * 2, include_metadata=True)
             matches = getattr(results, "matches", None) or getattr(results, "data", None) or results.get("matches", [])  # type: ignore[attr-defined]
+            
             stories: List[Dict[str, Any]] = []
+            seen_ids = set()    # [2025-10-29 김광현] 중복 체크용
+
             for m in matches:
                 mid = getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
+
+                # [2025-10-29 김광현] 중복 체크
+                if mid in seen_ids:
+                    continue
+                seen_ids.add(mid)
+
                 score = getattr(m, "score", None) or (m.get("score") if isinstance(m, dict) else 0.0)
                 meta = getattr(m, "metadata", None) or (m.get("metadata") if isinstance(m, dict) else {}) or {}
                 stories.append(
@@ -166,8 +177,14 @@ class StorySearchService:
                         "metadata": meta,
                     }
                 )
-            logger.info(f"Pinecone 검색 결과: {len(stories)}개")
+
+                # # [2025-10-29 김광현] 원하는 개수만큼 모이면 중단
+                if len(stories) >= top_k:
+                    break
+
+            logger.info(f"Pinecone 검색 결과 (중복 제거 전/후): {len(matches)}/{len(stories)}개")
             return self._normalize(stories)
+        
         except Exception as e:
             logger.error(f"Pinecone 검색 오류 → 더미 반환: {e}")
             return self._normalize(self._get_dummy_stories(emotion, interests or [], top_k))
