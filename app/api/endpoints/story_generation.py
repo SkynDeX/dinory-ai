@@ -117,9 +117,9 @@ def _fallback_first_scene(story_id: str, child_name: Optional[str]) -> Scene:
         sceneNumber=1,
         text=text,
         choices=[
-            Choice(id="c1", label="용기를 내본다", abilityType="COURAGE", abilityPoints=2),
-            Choice(id="c2", label="친구에게 묻는다", abilityType="FRIENDSHIP", abilityPoints=2),
-            Choice(id="c3", label="천천히 관찰한다", abilityType="CREATIVITY", abilityPoints=2),
+            Choice(id="c1", label="용기를 내본다", abilityType="용기", abilityPoints=2),
+            Choice(id="c2", label="친구에게 묻는다", abilityType="우정", abilityPoints=2),
+            Choice(id="c3", label="천천히 관찰한다", abilityType="창의성", abilityPoints=2),
         ],
     )
 
@@ -143,9 +143,9 @@ def _fallback_next_scene(scene_number: int, story_title: str, previous_choices: 
         sceneNumber=scene_number,
         text=txt,
         choices=[] if is_ending else [
-            Choice(id=f"c{scene_number}1", choiceId=f"c{scene_number}1", label="용기있게 행동하기", abilityType="COURAGE", abilityPoints=2),
-            Choice(id=f"c{scene_number}2", choiceId=f"c{scene_number}2", label="친구와 함께하기", abilityType="FRIENDSHIP", abilityPoints=2),
-            Choice(id=f"c{scene_number}3", choiceId=f"c{scene_number}3", label="창의적으로 해결하기", abilityType="CREATIVITY", abilityPoints=2),
+            Choice(id=f"c{scene_number}1", choiceId=f"c{scene_number}1", label="용기있게 행동하기", abilityType="용기", abilityPoints=2),
+            Choice(id=f"c{scene_number}2", choiceId=f"c{scene_number}2", label="친구와 함께하기", abilityType="우정", abilityPoints=2),
+            Choice(id=f"c{scene_number}3", choiceId=f"c{scene_number}3", label="창의적으로 해결하기", abilityType="창의성", abilityPoints=2),
         ],
     )
     return {"scene": scene, "isEnding": is_ending}
@@ -325,13 +325,15 @@ async def analyze_custom_choice(req: AnalyzeCustomChoiceRequest):
     try:
         txt = req.text.lower()
         if any(k in txt for k in ["용기", "brave", "courage"]):
-            ability, pts = "COURAGE", 2
-        elif any(k in txt for k in ["친구", "friend"]):
-            ability, pts = "FRIENDSHIP", 2
+            ability, pts = "용기", 2
+        elif any(k in txt for k in ["친구", "friend", "우정"]):
+            ability, pts = "우정", 2
         elif any(k in txt for k in ["아이디어", "idea", "창의"]):
-            ability, pts = "CREATIVITY", 2
+            ability, pts = "창의성", 2
+        elif any(k in txt for k in ["공감", "empathy", "이해"]):
+            ability, pts = "공감", 2
         else:
-            ability, pts = "RESPONSIBILITY", 1
+            ability, pts = "책임감", 1
 
         feedback = f"선택이 {ability}에 긍정적 영향을 줍니다. +{pts}"
         logger.info(f"분석 결과 ability={ability}, pts={pts}")

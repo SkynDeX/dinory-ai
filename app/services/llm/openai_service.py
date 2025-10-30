@@ -113,14 +113,14 @@ class OpenAIService:
             3. {emotion} 감정을 다루는 내용 포함 (감정 인정 → 긍정적 변화)
             4. {interests_text} 관련 요소 포함
             5. 각 씬마다 3개의 선택지 제공
-            6. 선택지는 다양한 능력치(친절, 용기, 공감, 우정, 자존감) 향상
+            6. 선택지는 다양한 능력치(용기, 공감, 창의성, 책임감, 우정) 향상
 
             **능력치 유형:**
-            - 친절: 다른 사람을 배려하고 도와주는 행동
             - 용기: 두려움을 극복하고 도전하는 행동
             - 공감: 다른 사람의 감정을 이해하는 행동
+            - 창의성: 새로운 아이디어를 내고 문제를 해결하는 행동
+            - 책임감: 자신의 행동에 책임을 지고 약속을 지키는 행동
             - 우정: 친구와 좋은 관계를 만드는 행동
-            - 자존감: 자신을 사랑하고 믿는 행동
 
             **출력 형식 (JSON):**
             {{
@@ -133,19 +133,19 @@ class OpenAIService:
                     {{
                     "choiceId": 1,
                     "choiceText": "선택지 1 (아이가 이해하기 쉬운 문장)",
-                    "abilityType": "친절",
+                    "abilityType": "용기",
                     "abilityScore": 10
                     }},
                     {{
                     "choiceId": 2,
                     "choiceText": "선택지 2",
-                    "abilityType": "용기",
+                    "abilityType": "공감",
                     "abilityScore": 15
                     }},
                     {{
                     "choiceId": 3,
                     "choiceText": "선택지 3",
-                    "abilityType": "공감",
+                    "abilityType": "창의성",
                     "abilityScore": 10
                     }}
                 ]
@@ -187,7 +187,7 @@ class OpenAIService:
         if not self.client:
             logger.error("OpenAI 클라이언트가 초기화되지 않았습니다.")
             return {
-                "abilityType": "친절",
+                "abilityType": "용기",
                 "abilityScore": 10,
                 "feedback": "좋은 선택이에요!",
                 "nextSceneBranch": None
@@ -204,15 +204,15 @@ class OpenAIService:
             {scene_context or "정보 없음"}
 
             **분석 기준:**
-            - 친절: 다른 사람을 배려하거나 도와주는 내용
             - 용기: 두려움을 극복하거나 도전하는 내용
             - 공감: 다른 사람의 감정을 이해하는 내용
+            - 창의성: 새로운 아이디어를 내거나 문제를 해결하는 내용
+            - 책임감: 자신의 행동에 책임을 지거나 약속을 지키는 내용
             - 우정: 친구와의 관계를 중요하게 생각하는 내용
-            - 자존감: 자신을 믿거나 긍정하는 내용
 
             **출력 형식 (JSON):**
             {{
-            "abilityType": "친절/용기/공감/우정/자존감 중 하나",
+            "abilityType": "용기/공감/창의성/책임감/우정 중 하나",
             "abilityScore": 8-15,
             "feedback": "아이에게 전할 긍정적인 피드백 (1-2문장)",
             "nextSceneBranch": null
@@ -238,7 +238,7 @@ class OpenAIService:
         except Exception as e:
             logger.error(f"Error analyzing custom choice: {e}")
             return {
-                "abilityType": "친절",
+                "abilityType": "용기",
                 "abilityScore": 10,
                 "feedback": "멋진 선택이에요!",
                 "nextSceneBranch": None
@@ -354,12 +354,23 @@ class OpenAIService:
 
         interests_text = ", ".join(interests) if interests else "친구와 우정"
 
-        # 이전 선택 요약
+        # 이전 선택 요약 및 능력치 분석
         choices_summary = ""
+        used_abilities = set()
         if previous_choices:
             choices_summary = "\n**아이의 이전 선택들:**\n"
             for choice in previous_choices:
-                choices_summary += f"- 씬 {choice.get('sceneNumber')}: \"{choice.get('choiceText')}\" ({choice.get('abilityType')})\n"
+                ability = choice.get('abilityType')
+                if ability:
+                    used_abilities.add(ability)
+                choices_summary += f"- 씬 {choice.get('sceneNumber')}: \"{choice.get('choiceText')}\" ({ability})\n"
+
+        # 아직 안 나온 능력치 찾기
+        all_abilities = {"용기", "공감", "창의성", "책임감", "우정"}
+        unused_abilities = all_abilities - used_abilities
+
+        if unused_abilities:
+            choices_summary += f"\n**[중요] 아직 안 나온 능력치: {', '.join(unused_abilities)} - 이 중에서 우선적으로 선택지를 만들어주세요!**\n"
 
         # 씬 단계별 가이드
         stage_guide = ""
@@ -406,7 +417,7 @@ class OpenAIService:
 2. {emotion} 감정을 다루는 따뜻한 이야기
 3. {interests_text} 요소를 포함
 4. 3개의 선택지 제공 (각기 다른 능력치)
-5. 능력치: 친절, 용기, 공감, 우정, 자존감 중 선택
+5. **능력치: 용기, 공감, 창의성, 책임감, 우정 중 선택 - 전체 동화에서 5가지 능력치가 골고루 나오도록 다양하게 배치하세요!**
 6. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 한글 문장
 7. 주인공은 동화 속 캐릭터로 설정 (특정 아이 이름 사용 금지
 
@@ -427,19 +438,19 @@ class OpenAIService:
             {{
                 "choiceId": 101,
                 "choiceText": "선택지 1 텍스트",
-                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
                 "abilityScore": 10-15
             }},
             {{
                 "choiceId": 102,
                 "choiceText": "선택지 2 텍스트",
-                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
                 "abilityScore": 10-15
             }},
             {{
                 "choiceId": 103,
                 "choiceText": "선택지 3 텍스트",
-                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
                 "abilityScore": 10-15
             }}
         ],
@@ -458,19 +469,19 @@ class OpenAIService:
             {{
                 "choiceId": {scene_number * 100 + 1},
                 "choiceText": "선택지 1 텍스트",
-                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
                 "abilityScore": 10-15
             }},
             {{
                 "choiceId": {scene_number * 100 + 2},
                 "choiceText": "선택지 2 텍스트",
-                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
                 "abilityScore": 10-15
             }},
             {{
                 "choiceId": {scene_number * 100 + 3},
                 "choiceText": "선택지 3 텍스트",
-                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
                 "abilityScore": 10-15
             }}
         ],
@@ -512,7 +523,7 @@ class OpenAIService:
                 {
                     "choiceId": scene_number * 100 + 2,
                     "choiceText": "친구를 도와줘요",
-                    "abilityType": "친절",
+                    "abilityType": "책임감",
                     "abilityScore": 10
                 },
                 {
@@ -544,7 +555,7 @@ class OpenAIService:
                     {
                         "choiceId": i * 10 + 2,
                         "choiceText": "친구를 도와줘요",
-                        "abilityType": "친절",
+                        "abilityType": "책임감",
                         "abilityScore": 10
                     },
                     {
