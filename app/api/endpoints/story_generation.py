@@ -266,15 +266,37 @@ async def generate_next_scene(req: NextSceneRequest):
                 scene = _scene_from_payload(result["scene"])
                 is_ending = result.get("isEnding", False)
 
-                # logger.info(f"OpenAI로 다음 장면 생성 완료 scene={scene.sceneNumber}, isEnding={is_ending}")
-                # return {"scene": scene.model_dump(), "isEnding": is_ending}
+                # [2025-10-30 김광현] 이미지 생성 추가
+                image_url = None
+                # OpenAI가 생성한 imagePrompt를 우선 사용
+                image_prompt = result["scene"].get("imagePrompt") or scene.text
+
+                if image_prompt:
+                    try:
+                        # imagePrompt가 한글이면 영어로 번역 필요
+                        if any('\uac00' <= c <= '\ud7a3' for c in image_prompt):
+                            # 씬 내용을 기반으로 영어 프롬프트 생성
+                            scene_content = result["scene"].get("content") or scene.text or ""
+                            image_prompt = f"Children's book illustration style, warm and friendly atmosphere, featuring the story: {scene_content[:100]}"
+
+                        logger.info(f"씬 {req.sceneNumber} 이미지 생성 시작: {image_prompt[:100]}...")
+                        image_url = await llm.generate_image_async(image_prompt, size="1024x1024")
+                        logger.info(f"씬 {req.sceneNumber} 이미지 생성 완료: {image_url[:80]}...")
+                    except Exception as img_error:
+                        logger.warning(f"이미지 생성 실패 (계속 진행): {img_error}")
+                        # 이미지 생성 실패해도 스토리는 계속 진행
+
                 logger.info(f"OpenAI로 다음 장면 생성 완료 scene={scene.sceneNumber}, isEnding={is_ending}")
 
                 # [2025-10-30 김광현] storyTitle이 있으면 응답에 포함
                 response = {"scene": scene.model_dump(), "isEnding": is_ending}
+
+                if image_url:
+                    response["imageUrl"] = image_url
+
                 if result.get("storyTitle"):
                     response["storyTitle"] = result["storyTitle"]
-                    logger.info(f"✅ 동화 제목 포함: {result['storyTitle']}")
+                    logger.info(f"동화 제목 포함: {result['storyTitle']}")
 
                 return response
 
@@ -323,12 +345,28 @@ async def analyze_custom_choice(req: AnalyzeCustomChoiceRequest):
 async def generate_image(req: GenerateImageRequest):
     logger.info(f"이미지 생성 요청: prompt={req.prompt}, size={req.size}")
     try:
-        dummy_url = f"https://picsum.photos/seed/{hash(req.prompt) % 100000}/{req.size}"
-        logger.info(f"이미지 생성 완료: {dummy_url}")
-        return {"url": dummy_url, "prompt": req.prompt, "size": req.size}
+        if OpenAIService():
+            try:
+                # [2025-10-30 김광현] 이미지 사용하기 위해 코드 변경
+                llm = OpenAIService()
+                image_url = await llm.generate_image_async(req.prompt, req.size or "1024x1024")
+                logger.info(f"DALE-E 이미지 생성 완료 : {image_url}")
+                return {"url": image_url, "prompt": req.prompt, "size": req.size}
+            except Exception as e:
+                logger.warning(f"DALL-E 실패, 더미 이미지 사용: {e}")
+                # 폴백: 더미 이미지
+                dummy_url = f"https://picsum.photos/seed/{hash(req.prompt) % 100000}/{req.size}"
+                return {"url": dummy_url, "prompt": req.prompt, "size": req.size}
+        else:
+            #  더미 이미지
+            dummy_url = f"https://picsum.photos/seed/{hash(req.prompt) % 100000}/{req.size}"
+            logger.info(f"이미지 생성 완료: {dummy_url}")
+            return {"url": dummy_url, "prompt": req.prompt, "size": req.size}
+        
     except Exception as e:
         logger.error(f"generate-image 실패: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
+    
 
 
 @router.get("/health")

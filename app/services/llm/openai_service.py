@@ -319,15 +319,15 @@ class OpenAIService:
             response = {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
             logger.info(f'scene_number={scene_number}, result에 storyTitle 있는지: {result.get("storyTitle")}') 
 
-            logger.info(f'✅ scene_number={scene_number}, result keys={list(result.keys())}')
-            logger.info(f'✅ result에 storyTitle 있는지: {result.get("storyTitle")}') 
+            logger.info(f'scene_number={scene_number}, result keys={list(result.keys())}')
+            logger.info(f'result에 storyTitle 있는지: {result.get("storyTitle")}') 
 
             if scene_number == 1:
                 if result.get('storyTitle'):
                     response['storyTitle'] = result.get('storyTitle')
-                    logger.info(f'✅✅✅ 동화 제목 생성됨: {response["storyTitle"]}')
+                    logger.info(f'동화 제목 생성됨: {response["storyTitle"]}')
                 else:
-                    logger.warning(f'⚠️⚠️⚠️ scene=1인데 storyTitle이 없음! result keys={list(result.keys())}')
+                    logger.warning(f'scene=1인데 storyTitle이 없음! result keys={list(result.keys())}')
 
             logger.info(f'씬 {scene_number} 생성 완료: content={len(scene.get("content", ""))}자, choices={len(scene.get("choices", []))}개')
             return response
@@ -479,13 +479,15 @@ class OpenAIService:
 }}
 """
 
-        prompt += """
+        prompt += f"""
 
-**중요:** 
+**중요:**
 - 씬 1에서는 storyTitle을 **scene 밖에** 별도로 포함해야 합니다!
 - 모든 텍스트는 한글로 작성
 - 동화 제목은 아이가 이해하기 쉬운 한글로 (예: "용감한 작은 토끼", "친구를 도운 꼬마 별")
-- imagePrompt만 영어로 작성
+- **imagePrompt는 반드시 영어로 작성하고, 씬 내용을 구체적으로 묘사해야 합니다!**
+  예시: "A cute little rabbit standing bravely in a magical forest, children's book illustration style, warm pastel colors, friendly atmosphere, digital art"
+- imagePrompt에는 씬의 주요 장면, 캐릭터, 분위기, 배경을 영어로 상세히 포함하세요
 - 반드시 위 JSON 형식을 정확히 따라주세요!
 
 씬 {scene_number}을 JSON 형식으로 생성해주세요!
@@ -596,3 +598,37 @@ class OpenAIService:
             story_id, story_title, story_description, emotion, interests,
             scene_number, previous_choices, story_context
         )
+
+    async def generate_image_async(self, prompt: str, size: str = "1024x1024") -> str:
+        """
+        DALL-E를 사용한 이미지 생성
+
+        Args:
+            prompt: 이미지 생성 프롬프트 (영어)
+            size: 이미지 크기 ("1024x1024", "1792x1024", "1024x1792")
+
+        Returns:
+            이미지 URL
+        """
+        if not self.client:
+            logger.error("OpenAI 클라이언트가 초기화되지 않았습니다.")
+            raise Exception("OpenAI 클라이언트 없음")
+
+        try:
+            logger.info(f"DALL-E 이미지 생성 중: {prompt[:50]}... (size: {size})")
+
+            response = self.client.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                size=size,
+                quality="standard",
+                n=1,
+            )
+
+            image_url = response.data[0].url
+            logger.info(f"이미지 생성 완료: {image_url}")
+            return image_url
+
+        except Exception as e:
+            logger.error(f"DALL-E 이미지 생성 실패: {e}")
+            raise
