@@ -4,7 +4,12 @@ import json
 import logging
 from typing import List, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("dinory.openai")
+if not logger.handlers:
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter("[OPENAI] %(asctime)s | %(levelname)s | %(message)s"))
+    logger.addHandler(h)
+logger.setLevel(logging.INFO)
 
 class OpenAIService:
     """OpenAI GPT를 사용한 동화 생성 서비스"""
@@ -299,6 +304,7 @@ class OpenAIService:
             # 응답 파싱
             content = response.choices[0].message.content
             logger.info(f'OpenAI 원본 응답: {content[:200]}...')  # 처음 200자만 로그
+            logger.info(f'OpenAI 원본 응답 전체: {content}')  
 
             result = json.loads(content)
             logger.info(f'파싱된 JSON 키들: {list(result.keys())}')
@@ -311,13 +317,19 @@ class OpenAIService:
 
             # ✅ 씬 1인 경우 storyTitle 추출하여 응답에 포함
             response = {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
+            logger.info(f'scene_number={scene_number}, result에 storyTitle 있는지: {result.get("storyTitle")}') 
 
-            if scene_number == 1 and result.get('storyTitle'):
-                response['storyTitle'] = result.get('storyTitle')
-                logger.info(f'✅ 동화 제목 생성됨: {response["storyTitle"]}')
+            logger.info(f'✅ scene_number={scene_number}, result keys={list(result.keys())}')
+            logger.info(f'✅ result에 storyTitle 있는지: {result.get("storyTitle")}') 
+
+            if scene_number == 1:
+                if result.get('storyTitle'):
+                    response['storyTitle'] = result.get('storyTitle')
+                    logger.info(f'✅✅✅ 동화 제목 생성됨: {response["storyTitle"]}')
+                else:
+                    logger.warning(f'⚠️⚠️⚠️ scene=1인데 storyTitle이 없음! result keys={list(result.keys())}')
 
             logger.info(f'씬 {scene_number} 생성 완료: content={len(scene.get("content", ""))}자, choices={len(scene.get("choices", []))}개')
-            # return {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
             return response
 
         except Exception as e:
@@ -390,7 +402,7 @@ class OpenAIService:
 {story_context or "첫 번째 씬입니다."}
 
 **요구사항:**
-1. {'씬 1인 경우 동화 제목도 함께 생성해주세요 (한글로, 예: "용감한 꼬마 호랑이", "마법의 숲 탐험")'  if scene_number == 1 else '이전 스토리에 이어지는 내용으로 작성'}
+1. {f'**[중요]** 씬 1에서는 반드시 storyTitle을 생성해야 합니다! 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요.' if scene_number == 1 else '이전 스토리에 이어지는 내용으로 작성'}
 2. {emotion} 감정을 다루는 따뜻한 이야기
 3. {interests_text} 요소를 포함
 4. 3개의 선택지 제공 (각기 다른 능력치)
@@ -401,43 +413,84 @@ class OpenAIService:
 {ending_note}
 
 **출력 형식 (JSON):**
+"""
+
+        if scene_number == 1:
+            prompt += f"""
 {{
-    {'"storyTitle": "동화 제목 (한글, 씬 1인 경우에만)",' if scene_number == 1 else ''}
+    "storyTitle": "동화 제목 (한글로 필수! 예: 용감한 꼬마 호랑이, 친구를 도운 작은 별 등)",
+    "scene": {{
+        "sceneNumber": 1,
+        "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
+        "imagePrompt": "DALL-E용 영어 프롬프트",
+        "choices": [
+            {{
+                "choiceId": 101,
+                "choiceText": "선택지 1 텍스트",
+                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityScore": 10-15
+            }},
+            {{
+                "choiceId": 102,
+                "choiceText": "선택지 2 텍스트",
+                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityScore": 10-15
+            }},
+            {{
+                "choiceId": 103,
+                "choiceText": "선택지 3 텍스트",
+                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityScore": 10-15
+            }}
+        ],
+        "isEnding": false
+    }}
+}}
+"""
+        else:
+            prompt += f"""
+{{
     "scene": {{
         "sceneNumber": {scene_number},
         "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
         "imagePrompt": "DALL-E용 영어 프롬프트",
         "choices": [
-        {{
-            "choiceId": {scene_number * 100 + 1},
-            "choiceText": "선택지 1 텍스트",
-            "abilityType": "친절/용기/공감/우정/자존감 (한글)",
-            "abilityScore": 10-15
-        }},
-        {{
-            "choiceId": {scene_number * 100 + 2},
-            "choiceText": "선택지 2 텍스트",
-            "abilityType": "친절/용기/공감/우정/자존감 (한글)",
-            "abilityScore": 10-15
-        }},
-        {{
-            "choiceId": {scene_number * 100 + 3},
-            "choiceText": "선택지 3 텍스트",
-            "abilityType": "친절/용기/공감/우정/자존감 (한글)",
-            "abilityScore": 10-15
-        }}
+            {{
+                "choiceId": {scene_number * 100 + 1},
+                "choiceText": "선택지 1 텍스트",
+                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityScore": 10-15
+            }},
+            {{
+                "choiceId": {scene_number * 100 + 2},
+                "choiceText": "선택지 2 텍스트",
+                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityScore": 10-15
+            }},
+            {{
+                "choiceId": {scene_number * 100 + 3},
+                "choiceText": "선택지 3 텍스트",
+                "abilityType": "친절/용기/공감/우정/자존감 (한글)",
+                "abilityScore": 10-15
+            }}
         ],
         "isEnding": {str(is_ending).lower()}
     }}
 }}
+"""
+
+        prompt += """
 
 **중요:** 
+- 씬 1에서는 storyTitle을 **scene 밖에** 별도로 포함해야 합니다!
 - 모든 텍스트는 한글로 작성
 - 동화 제목은 아이가 이해하기 쉬운 한글로 (예: "용감한 작은 토끼", "친구를 도운 꼬마 별")
 - imagePrompt만 영어로 작성
+- 반드시 위 JSON 형식을 정확히 따라주세요!
 
 씬 {scene_number}을 JSON 형식으로 생성해주세요!
 """
+        
 
         return prompt
 

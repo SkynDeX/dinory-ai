@@ -266,8 +266,17 @@ async def generate_next_scene(req: NextSceneRequest):
                 scene = _scene_from_payload(result["scene"])
                 is_ending = result.get("isEnding", False)
 
+                # logger.info(f"OpenAI로 다음 장면 생성 완료 scene={scene.sceneNumber}, isEnding={is_ending}")
+                # return {"scene": scene.model_dump(), "isEnding": is_ending}
                 logger.info(f"OpenAI로 다음 장면 생성 완료 scene={scene.sceneNumber}, isEnding={is_ending}")
-                return {"scene": scene.model_dump(), "isEnding": is_ending}
+
+                # [2025-10-30 김광현] storyTitle이 있으면 응답에 포함
+                response = {"scene": scene.model_dump(), "isEnding": is_ending}
+                if result.get("storyTitle"):
+                    response["storyTitle"] = result["storyTitle"]
+                    logger.info(f"✅ 동화 제목 포함: {result['storyTitle']}")
+
+                return response
 
             except Exception as e:
                 logger.warning(f"OpenAI 실패, 폴백 사용: {e}")
