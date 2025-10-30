@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, AliasChoices, ConfigDict
 from typing import List, Optional, Dict, Any
-import time, random, logging, traceback
+import time, random, logging, traceback, json
 
 logger = logging.getLogger("dinory.storygen")
 if not logger.handlers:
@@ -323,21 +323,72 @@ async def generate_next_scene(req: NextSceneRequest):
 async def analyze_custom_choice(req: AnalyzeCustomChoiceRequest):
     logger.info(f"선택 분석 요청: text={req.text}")
     try:
+        # OpenAI를 사용한 정교한 분석
+        llm = OpenAIService()
+        if llm and llm.client:
+            try:
+                prompt = f"""
+                사용자가 동화에서 입력한 선택지를 분석하여 어떤 능력치가 향상되는지 판단해주세요.
+
+                선택지: "{req.text}"
+
+                다음 5가지 능력치 중 가장 적합한 것을 선택하세요:
+                - 용기: 두려움을 극복하고 도전하는 행동 (예: 혼자 해결, 앞으로 나아가기, 시도하기)
+                - 공감: 다른 사람의 감정을 이해하고 배려하는 행동 (예: 위로하기, 도와주기, 함께 슬퍼하기)
+                - 창의성: 새로운 아이디어나 독특한 해결책을 제시하는 행동 (예: 발명, 다른 방법 시도, 상상력)
+                - 책임감: 의무를 다하고 약속을 지키는 행동 (예: 청소하기, 약속 지키기, 맡은 일 완수)
+                - 우정: 친구와의 관계를 중요시하고 함께하는 행동 (예: 친구 찾기, 같이 놀기, 도움 요청)
+
+                JSON 형식으로 응답해주세요:
+                {{
+                "abilityType": "능력치 이름 (용기/공감/창의성/책임감/우정)",
+                "abilityPoints": 점수 (1~3),
+                "reason": "이유 설명"
+                }}
+                """
+                
+                response = llm.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.7
+                )
+                
+                result = json.loads(response.choices[0].message.content)
+                ability_type = result.get("abilityType", "책임감")
+                ability_points = result.get("abilityPoints", 2)
+                reason = result.get("reason", "")
+                
+                feedback = f"'{req.text}' → {ability_type} +{ability_points} ({reason})"
+                logger.info(f"AI 분석 결과: {ability_type} +{ability_points}")
+                
+                return {
+                    "abilityType": ability_type,
+                    "abilityPoints": ability_points,
+                    "feedback": feedback
+                }
+                
+            except Exception as e:
+                logger.warning(f"OpenAI 분석 실패, 폴백 사용: {e}")
+                # 폴백으로 기존 키워드 매칭 사용
+        
+        # 폴백: 키워드 매칭
         txt = req.text.lower()
-        if any(k in txt for k in ["용기", "brave", "courage"]):
+        if any(k in txt for k in ["용기", "brave", "courage", "도전", "혼자", "앞으로"]):
             ability, pts = "용기", 2
-        elif any(k in txt for k in ["친구", "friend", "우정"]):
+        elif any(k in txt for k in ["친구", "friend", "우정", "같이", "함께"]):
             ability, pts = "우정", 2
-        elif any(k in txt for k in ["아이디어", "idea", "창의"]):
+        elif any(k in txt for k in ["아이디어", "idea", "창의", "발명", "만들"]):
             ability, pts = "창의성", 2
-        elif any(k in txt for k in ["공감", "empathy", "이해"]):
+        elif any(k in txt for k in ["공감", "empathy", "이해", "위로", "도와"]):
             ability, pts = "공감", 2
         else:
             ability, pts = "책임감", 1
 
         feedback = f"선택이 {ability}에 긍정적 영향을 줍니다. +{pts}"
-        logger.info(f"분석 결과 ability={ability}, pts={pts}")
+        logger.info(f"키워드 매칭 결과: ability={ability}, pts={pts}")
         return {"abilityType": ability, "abilityPoints": pts, "feedback": feedback}
+        
     except Exception as e:
         logger.error(f"analyze-custom-choice 실패: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
