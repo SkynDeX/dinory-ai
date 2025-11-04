@@ -266,3 +266,76 @@ class ChatbotService:
             return "\n".join(details)
         else:
             return "  * 능력치 정보 없음"
+
+    async def generate_choices(
+        self,
+        session_id: int,
+        child_id: Optional[int] = None,
+        last_message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        [2025-11-04 김민중 추가] AI 기반 동적 선택지 생성
+        대화 맥락에 맞는 선택지를 생성하고, Dino의 감정도 판단합니다.
+        """
+        print(f"\n=== generate_choices 호출 ===")
+        print(f"session_id: {session_id}, last_message: {last_message}")
+
+        # 대화 히스토리 가져오기
+        history = self.conversation_history.get(session_id, [])
+
+        # 최근 대화 맥락 구성 (마지막 3개 메시지)
+        recent_context = history[-3:] if len(history) > 3 else history
+        context_text = "\n".join([
+            f"{'사용자' if msg['role'] == 'user' else 'AI'}: {msg['content']}"
+            for msg in recent_context
+        ])
+
+        try:
+            # AI에게 선택지 생성 요청
+            prompt = f"""
+대화 맥락:
+{context_text}
+
+위 대화를 바탕으로:
+1. 아이가 선택할 수 있는 자연스러운 대화 선택지 2-3개를 생성해주세요
+2. 각 선택지는 짧고 간단해야 합니다 (5-10자)
+3. 선택지는 대화를 이어가는 데 도움이 되어야 합니다
+4. 현재 아이의 감정을 다음 중 하나로 판단해주세요: happy, sad, angry, neutral
+
+응답 형식 (JSON):
+{{
+    "choices": ["선택지1", "선택지2", "선택지3"],
+    "emotion": "감정"
+}}
+"""
+
+            messages = [
+                {"role": "system", "content": "당신은 아이와의 대화를 돕는 AI입니다. JSON 형식으로만 응답하세요."},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=200,
+                response_format={"type": "json_object"}
+            )
+
+            import json
+            result = json.loads(response.choices[0].message.content)
+
+            print(f"생성된 선택지: {result}")
+
+            return {
+                "choices": result.get("choices", ["더 알려줘", "다른 이야기"]),
+                "emotion": result.get("emotion", "neutral")
+            }
+
+        except Exception as e:
+            print(f"Error generating choices: {e}")
+            # 폴백: 기본 선택지 반환
+            return {
+                "choices": ["더 알려줘", "다른 이야기"],
+                "emotion": "neutral"
+            }

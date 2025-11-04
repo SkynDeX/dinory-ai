@@ -57,6 +57,17 @@ class StoryCompletionChatRequest(BaseModel):
     choices: List[Dict[str, Any]]
 
 
+class GenerateChoicesRequest(BaseModel):
+    session_id: Optional[int] = None
+    child_id: Optional[int] = None
+    last_message: Optional[str] = None
+
+
+class GenerateChoicesResponse(BaseModel):
+    choices: List[str]
+    emotion: str
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
@@ -129,4 +140,30 @@ async def init_chat_from_story(request: StoryCompletionChatRequest):
 
     except Exception as e:
         print(f"Error in init_chat_from_story: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/chat/generate-choices", response_model=GenerateChoicesResponse)
+async def generate_choices(request: GenerateChoicesRequest):
+    """
+    [2025-11-04 김민중 추가] AI 기반 동적 선택지 생성
+    대화 맥락에 맞는 선택지를 생성하고, Dino의 감정을 판단합니다.
+    """
+    try:
+        chatbot_service = get_chatbot_service()
+
+        # AI 선택지 생성
+        result = await chatbot_service.generate_choices(
+            session_id=request.session_id or 0,
+            child_id=request.child_id,
+            last_message=request.last_message
+        )
+
+        return GenerateChoicesResponse(
+            choices=result["choices"],
+            emotion=result["emotion"]
+        )
+
+    except Exception as e:
+        print(f"Error in generate_choices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
