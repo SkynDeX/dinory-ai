@@ -1,10 +1,16 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+import os
 from app.services.chat.chatbot_service import ChatbotService
+from app.services.chat.chatbot_service_with_rag import ChatbotServiceWithRAG
 from app.services.chat.response_generator import ResponseGenerator
 
 router = APIRouter()
+
+# RAG 메모리 사용 여부 (환경변수로 제어)
+USE_RAG = os.getenv("USE_RAG_MEMORY", "false").lower() == "true"
+USE_PINECONE = os.getenv("USE_PINECONE_MEMORY", "false").lower() == "true"
 
 # 서비스를 전역 변수로 선언하지만 초기화는 하지 않음
 _chatbot_service = None
@@ -13,7 +19,12 @@ _response_generator = None
 def get_chatbot_service():
     global _chatbot_service
     if _chatbot_service is None:
-        _chatbot_service = ChatbotService()
+        if USE_RAG:
+            print(f"✅ RAG Memory ENABLED (Pinecone: {USE_PINECONE})")
+            _chatbot_service = ChatbotServiceWithRAG(use_pinecone=USE_PINECONE)
+        else:
+            print("⚠️ RAG Memory DISABLED (using basic chatbot service)")
+            _chatbot_service = ChatbotService()
     return _chatbot_service
 
 def get_response_generator():

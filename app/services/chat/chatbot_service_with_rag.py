@@ -1,10 +1,33 @@
+"""
+Enhanced Chatbot Service with RAG Memory
+기존 chatbot_service.py를 확장하여 RAG 메모리 기능 추가
+"""
+
 import os
 from typing import Optional, Dict, Any, List
 from openai import AsyncOpenAI
+from app.services.chat.memory_service import MemoryService
 
 
-class ChatbotService:
-    def __init__(self):
+class ChatbotServiceWithRAG:
+    """
+    RAG 메모리가 통합된 챗봇 서비스
+
+    기존 기능:
+    - 세션별 대화 히스토리 관리
+    - 동화 컨텍스트 기반 대화
+
+    새로운 RAG 기능:
+    - 과거 모든 대화 기억
+    - 완료한 동화 기록 참조
+    - 시맨틱 검색으로 관련 컨텍스트 자동 검색
+    """
+
+    def __init__(self, use_pinecone: bool = False):
+        """
+        Args:
+            use_pinecone: True면 Pinecone 벡터 검색 사용, False면 MySQL만 사용
+        """
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = "gpt-4o-mini"
         self.system_prompt = """
@@ -19,10 +42,14 @@ class ChatbotService:
 6. 안전하고 건전한 대화를 유지하세요
 7. 짧고 간결하게 대화하세요 (1-3문장)
 """
-        # 세션별 대화 히스토리 저장
+        # 세션별 대화 히스토리 저장 (현재 세션 내 메모리)
         self.conversation_history = {}
         # 세션별 동화 컨텍스트 저장
         self.story_context = {}
+
+        # RAG 메모리 서비스 (장기 메모리)
+        self.memory_service = MemoryService(use_pinecone=use_pinecone)
+        self.use_memory = True  # RAG 기능 on/off
 
     async def generate_response(
         self,
@@ -31,12 +58,11 @@ class ChatbotService:
         child_id: Optional[int] = None
     ) -> str:
         """
-        아이의 메시지에 대한 AI 응답 생성
+        아이의 메시지에 대한 AI 응답 생성 (RAG 메모리 통합)
         """
-        print(f"\n=== generate_response 호출 ===")
-        print(f"session_id: {session_id}")
+        print(f"\n=== generate_response with RAG ===")
+        print(f"session_id: {session_id}, child_id: {child_id}")
         print(f"message: {message}")
-        print(f"현재 story_context 키들: {list(self.story_context.keys())}")
 
         # 세션 히스토리 가져오기 또는 초기화
         if session_id not in self.conversation_history:
@@ -50,42 +76,12 @@ class ChatbotService:
 
         # OpenAI API 호출
         try:
-            # 동화 컨텍스트가 있으면 시스템 프롬프트에 추가
-            system_prompt = self.system_prompt
-            if session_id in self.story_context:
-                print(f"✅ story_context 발견! session_id={session_id}")
-                story_info = self.story_context[session_id]
-                print(f"story_info: {story_info}")
-
-                ability_analysis = self._analyze_abilities(story_info["abilities"])
-                ability_details = self._format_ability_details(story_info["abilities"])
-
-                print(f"능력치 상세:\n{ability_details}")
-
-                system_prompt = f"""
-당신은 아이들을 위한 친절하고 따뜻한 AI 친구 '디노'입니다.
-
-**동화 정보:**
-- 동화 제목: '{story_info["story_title"]}'
-- 획득한 능력치:
-{ability_details}
-
-**중요 지침:**
-- 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
-- 예: "용기 31점, 공감 10점, 창의성 2점, 책임감 12점을 얻었어!" 처럼 구체적으로 답변하세요
-- 동화 내용과 연관지어 대화하세요
-
-**대화 가이드라인:**
-1. 반말로 친근하게 대화하세요 (예: "~야", "~니?", "~어")
-2. 동화 내용과 연관지어 공감하고 이야기하세요
-3. 아이의 감정을 이해하고 격려해주세요
-4. 짧고 간결하게 1-2문장으로 대화하세요
-5. 이모지를 적절히 사용하세요 (😊, 💙, ✨)
-6. 아이의 생각과 감정을 더 이끌어내는 질문을 하세요
-"""
-                print(f"생성된 시스템 프롬프트:\n{system_prompt[:500]}...")
-            else:
-                print(f"❌ story_context 없음! session_id={session_id}")
+            # 시스템 프롬프트 생성 (기본 또는 동화 컨텍스트)
+            system_prompt = await self._build_system_prompt(
+                session_id,
+                message,
+                child_id
+            )
 
             messages = [
                 {"role": "system", "content": system_prompt}
@@ -113,18 +109,71 @@ class ChatbotService:
             print(f"Error generating response: {e}")
             return "죄송해요, 잠시 후에 다시 이야기해요!"
 
-    def clear_history(self, session_id: int):
+    async def _build_system_prompt(
+        self,
+        session_id: int,
+        current_message: str,
+        child_id: Optional[int]
+    ) -> str:
         """
-        특정 세션의 대화 히스토리 삭제
+        RAG 메모리를 활용하여 컨텍스트가 풍부한 시스템 프롬프트 생성
         """
-        if session_id in self.conversation_history:
-            del self.conversation_history[session_id]
+        base_prompt = self.system_prompt
 
-    def get_history(self, session_id: int):
-        """
-        특정 세션의 대화 히스토리 조회
-        """
-        return self.conversation_history.get(session_id, [])
+        # 1. 동화 컨텍스트 (현재 세션에 동화 정보가 있으면)
+        story_context_text = ""
+        if session_id in self.story_context:
+            story_info = self.story_context[session_id]
+            ability_details = self._format_ability_details(story_info["abilities"])
+
+            story_context_text = f"""
+**동화 정보:**
+- 동화 제목: '{story_info["story_title"]}'
+- 획득한 능력치:
+{ability_details}
+
+**중요 지침:**
+- 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
+- 동화 내용과 연관지어 대화하세요
+"""
+
+        # 2. RAG 메모리 (과거 대화 및 동화 기록)
+        memory_context_text = ""
+        if self.use_memory and child_id:
+            memory_context = await self.memory_service.get_relevant_context(
+                current_message=current_message,
+                child_id=child_id,
+                session_id=session_id
+            )
+
+            if memory_context["summary"]:
+                memory_context_text = f"""
+**아이의 기억 (과거 기록):**
+{memory_context["summary"]}
+
+**대화 지침:**
+- 아이가 과거에 읽은 동화나 이전 대화를 물어보면 위 기록을 참고하세요
+- "지난번에 뭐 읽었어?", "전에 무슨 얘기했지?" 같은 질문에 답변하세요
+- 자연스럽게 과거 경험을 언급하며 대화를 이어가세요
+"""
+
+        # 3. 통합 프롬프트 생성
+        enhanced_prompt = f"""
+{base_prompt}
+
+{story_context_text}
+
+{memory_context_text}
+
+**대화 가이드라인:**
+1. 반말로 친근하게 대화하세요 (예: "~야", "~니?", "~어")
+2. 아이의 감정을 이해하고 격려해주세요
+3. 짧고 간결하게 1-2문장으로 대화하세요
+4. 이모지를 적절히 사용하세요 (😊, 💙, ✨)
+5. 아이의 생각과 감정을 더 이끌어내는 질문을 하세요
+""".strip()
+
+        return enhanced_prompt
 
     async def generate_first_message_from_story(
         self,
@@ -137,13 +186,9 @@ class ChatbotService:
         total_time: Optional[int] = None
     ) -> str:
         """
-        동화 완료 후 첫 대화 메시지 생성
+        동화 완료 후 첫 대화 메시지 생성 (기존 기능 유지)
         """
-        print(f"\n=== generate_first_message_from_story 호출 ===")
-        print(f"session_id: {session_id}")
-        print(f"child_name: {child_name}")
-        print(f"story_title: {story_title}")
-        print(f"abilities: {abilities}")
+        print(f"\n=== generate_first_message_from_story ===")
 
         # 세션 히스토리 초기화
         if session_id not in self.conversation_history:
@@ -156,11 +201,8 @@ class ChatbotService:
             "abilities": abilities,
             "choices": choices
         }
-        print(f"✅ story_context 저장 완료! session_id={session_id}")
-        print(f"저장된 내용: {self.story_context[session_id]}")
 
         # 능력치 분석
-        ability_analysis = self._analyze_abilities(abilities)
         ability_details = self._format_ability_details(abilities)
 
         # 동화별 맞춤 시스템 프롬프트 생성
@@ -216,36 +258,19 @@ class ChatbotService:
 
         except Exception as e:
             print(f"Error generating first message from story: {e}")
-            # 폴백 메시지
             return f"{child_name}야, 동화 어땠어? 재미있었니? 지금 기분이 어때? 😊"
 
-    def _analyze_abilities(self, abilities: Dict[str, int]) -> str:
-        """
-        능력치를 분석하여 텍스트로 변환
-        """
-        ability_names = {
-            "courage": "용기",
-            "empathy": "공감",
-            "creativity": "창의성",
-            "responsibility": "책임감",
-            "friendship": "우정"
-        }
+    def clear_history(self, session_id: int):
+        """특정 세션의 대화 히스토리 삭제"""
+        if session_id in self.conversation_history:
+            del self.conversation_history[session_id]
 
-        analysis_parts = []
-        for key, value in abilities.items():
-            if value > 0:
-                korean_name = ability_names.get(key, key)
-                analysis_parts.append(f"{korean_name} +{value}")
-
-        if analysis_parts:
-            return ", ".join(analysis_parts)
-        else:
-            return "특별한 선택을 했어요"
+    def get_history(self, session_id: int):
+        """특정 세션의 대화 히스토리 조회"""
+        return self.conversation_history.get(session_id, [])
 
     def _format_ability_details(self, abilities: Dict[str, int]) -> str:
-        """
-        능력치를 상세하게 포맷팅 (AI가 명확히 볼 수 있도록)
-        """
+        """능력치를 상세하게 포맷팅"""
         ability_names = {
             "courage": "용기",
             "empathy": "공감",
@@ -262,7 +287,4 @@ class ChatbotService:
             else:
                 details.append(f"  * {korean_name}: 0점")
 
-        if details:
-            return "\n".join(details)
-        else:
-            return "  * 능력치 정보 없음"
+        return "\n".join(details) if details else "  * 능력치 정보 없음"

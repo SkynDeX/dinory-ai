@@ -45,11 +45,13 @@ app.add_middleware(AccessLogMiddleware)
 # --- 라우터 등록 ---
 from app.api.endpoints.story_generation import router as story_router
 from app.api.endpoints.chat import router as chat_router
+from app.api.endpoints.memory_sync import router as memory_router
 import app.api.endpoints.story_generation as story_generation_mod
 import app.api.endpoints.chat as chat_mod
 
 app.include_router(story_router, prefix="/ai", tags=["ai"])
 app.include_router(chat_router,  prefix="/api", tags=["chat"])
+app.include_router(memory_router, prefix="/api/memory", tags=["memory"])  # RAG 메모리 동기화
 
 # ★ alias 라우트: 지연 import로 순환/경로 문제 방지
 from pydantic import BaseModel
