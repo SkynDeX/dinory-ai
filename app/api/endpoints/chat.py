@@ -55,6 +55,7 @@ class StoryCompletionChatRequest(BaseModel):
     total_time: Optional[int] = None
     abilities: Dict[str, int]
     choices: List[Dict[str, Any]]
+    scenes: Optional[List[Dict[str, Any]]] = None  # [2025-11-04 김민중 추가] Scene 정보
 
 
 class GenerateChoicesRequest(BaseModel):
@@ -121,7 +122,7 @@ async def init_chat_from_story(request: StoryCompletionChatRequest):
     try:
         chatbot_service = get_chatbot_service()
 
-        # 동화 기반 첫 메시지 생성
+        # [2025-11-04 김민중 수정] Scene 정보도 함께 전달
         first_message = await chatbot_service.generate_first_message_from_story(
             session_id=request.session_id,
             child_name=request.child_name,
@@ -129,7 +130,8 @@ async def init_chat_from_story(request: StoryCompletionChatRequest):
             story_id=request.story_id,
             abilities=request.abilities,
             choices=request.choices,
-            total_time=request.total_time
+            total_time=request.total_time,
+            scenes=request.scenes  # Scene 정보 추가
         )
 
         return ChatResponse(

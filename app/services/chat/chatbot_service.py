@@ -134,7 +134,8 @@ class ChatbotService:
         story_id: str,
         abilities: Dict[str, int],
         choices: List[Dict[str, Any]],
-        total_time: Optional[int] = None
+        total_time: Optional[int] = None,
+        scenes: Optional[List[Dict[str, Any]]] = None  # [2025-11-04 김민중 추가]
     ) -> str:
         """
         동화 완료 후 첫 대화 메시지 생성
@@ -149,12 +150,13 @@ class ChatbotService:
         if session_id not in self.conversation_history:
             self.conversation_history[session_id] = []
 
-        # 동화 컨텍스트 저장
+        # [2025-11-04 김민중 수정] 동화 컨텍스트 저장 (scenes 정보 포함)
         self.story_context[session_id] = {
             "story_title": story_title,
             "story_id": story_id,
             "abilities": abilities,
-            "choices": choices
+            "choices": choices,
+            "scenes": scenes or []  # Scene 정보 추가
         }
         print(f"✅ story_context 저장 완료! session_id={session_id}")
         print(f"저장된 내용: {self.story_context[session_id]}")
@@ -162,6 +164,17 @@ class ChatbotService:
         # 능력치 분석
         ability_analysis = self._analyze_abilities(abilities)
         ability_details = self._format_ability_details(abilities)
+
+        # [2025-11-04 김민중 추가] Scene 정보 포맷팅
+        scenes_text = ""
+        if scenes:
+            scenes_text = "\n**동화 장면별 내용:**\n"
+            for scene in scenes:
+                scene_num = scene.get("sceneNumber", "?")
+                content = scene.get("content", "")
+                # 내용이 너무 길면 일부만 표시
+                short_content = content[:200] + "..." if len(content) > 200 else content
+                scenes_text += f"  {scene_num}번째 장면: {short_content}\n"
 
         # 동화별 맞춤 시스템 프롬프트 생성
         story_aware_prompt = f"""
@@ -171,10 +184,12 @@ class ChatbotService:
 
 **획득한 능력치:**
 {ability_details}
-
+{scenes_text}
 **중요 지침:**
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
+- 아이가 "몇 번째 장면", "장면 내용" 등을 물어보면 위 장면 정보를 참고하여 답변하세요
 - 동화 내용과 연관지어 대화하세요
+- 아이가 "동화 추천해줘", "다른 동화 알려줘" 같은 요청을 하면, 동화 추천 의도를 감지하고 추천해주세요
 
 **대화 가이드라인:**
 1. 반말로 친근하게 대화하세요 (예: "{child_name}야", "어땠어?", "재미있었니?")
