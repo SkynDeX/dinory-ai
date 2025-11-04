@@ -108,6 +108,13 @@ class GenerateImageRequest(BaseModel):
     size: Optional[str] = "1024x1024"
 
 
+class CreateImagePromptRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore', populate_by_name=True)
+
+    koreanText: str = Field(validation_alias=AliasChoices('koreanText', 'korean_text'))
+    maxLength: Optional[int] = Field(default=150, validation_alias=AliasChoices('maxLength', 'max_length'))
+
+
 # ==================== 폴백 유틸 ====================
 
 def _fallback_first_scene(story_id: str, child_name: Optional[str]) -> Scene:
@@ -420,6 +427,103 @@ async def generate_image(req: GenerateImageRequest):
         logger.error(f"generate-image 실패: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
     
+
+
+@router.post("/create-image-prompt")
+async def create_image_prompt(req: CreateImagePromptRequest):
+    """
+    한글 동화 내용을 이미지 생성에 적합한 짧은 영어 프롬프트로 변환
+
+    Args:
+        koreanText: 한글 동화 내용
+        maxLength: 최대 프롬프트 길이 (기본값: 150자)
+
+    Returns:
+        영어 이미지 프롬프트
+    """
+    logger.info(f"이미지 프롬프트 생성 요청: {req.koreanText[:50]}...")
+
+    try:
+        if OpenAIService:
+            try:
+                llm = OpenAIService()
+
+                prompt = f"""
+다음 한글 동화 내용을 이미지 생성 AI(PollinationAI)가 이해할 수 있는 짧고 효과적인 영어 프롬프트로 변환해주세요.
+
+**한글 동화 내용:**
+{req.koreanText}
+
+**요구사항:**
+1. 핵심 시각적 요소만 추출 (캐릭터, 배경, 분위기, 행동)
+2. 최대 {req.maxLength}자 이내의 영어로 작성
+3. 어린이 동화책 일러스트레이션 스타일 명시
+4. 구체적이고 명확한 묘사
+5. PollinationAI가 이해하기 쉬운 간결한 문장
+
+**좋은 예시:**
+- "A cute little rabbit bravely walking through a magical forest, warm pastel colors, children's book illustration style"
+- "A young boy helping a small bird with a broken wing, gentle and caring atmosphere, watercolor style"
+
+**출력 형식 (JSON):**
+{{
+    "imagePrompt": "영어 프롬프트 (최대 {req.maxLength}자)",
+    "keyElements": ["주요 요소1", "주요 요소2", "주요 요소3"]
+}}
+
+JSON 형식으로 응답해주세요.
+"""
+
+                response = llm.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 이미지 프롬프트 작성 전문가입니다. 한글 텍스트에서 핵심 시각적 요소를 추출하여 짧고 효과적인 영어 프롬프트를 만듭니다."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.7
+                )
+
+                result = json.loads(response.choices[0].message.content)
+                image_prompt = result.get("imagePrompt", "")
+                key_elements = result.get("keyElements", [])
+
+                # 프롬프트 길이 제한
+                if len(image_prompt) > req.maxLength:
+                    image_prompt = image_prompt[:req.maxLength].rsplit(' ', 1)[0]  # 마지막 단어가 잘리지 않도록
+
+                logger.info(f"프롬프트 생성 완료: {image_prompt}")
+
+                return {
+                    "imagePrompt": image_prompt,
+                    "keyElements": key_elements,
+                    "originalLength": len(req.koreanText),
+                    "promptLength": len(image_prompt)
+                }
+
+            except Exception as e:
+                logger.warning(f"OpenAI 프롬프트 생성 실패, 폴백 사용: {e}")
+                # 폴백: 간단한 변환
+
+        # 폴백: 간단한 키워드 추출 및 기본 프롬프트
+        fallback_prompt = f"Children's book illustration, warm and friendly atmosphere, {req.koreanText[:50]}"
+        if len(fallback_prompt) > req.maxLength:
+            fallback_prompt = fallback_prompt[:req.maxLength].rsplit(' ', 1)[0]
+
+        logger.info(f"폴백 프롬프트 사용: {fallback_prompt}")
+        return {
+            "imagePrompt": fallback_prompt,
+            "keyElements": ["children's book", "illustration"],
+            "originalLength": len(req.koreanText),
+            "promptLength": len(fallback_prompt)
+        }
+
+    except Exception as e:
+        logger.error(f"create-image-prompt 실패: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/health")
