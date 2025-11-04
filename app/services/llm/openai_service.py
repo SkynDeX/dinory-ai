@@ -358,12 +358,26 @@ class OpenAIService:
         choices_summary = ""
         used_abilities = set()
         if previous_choices:
-            choices_summary = "\n**아이의 이전 선택들:**\n"
-            for choice in previous_choices:
+            choices_summary = "\n**아이의 이전 선택들과 그 영향:**\n"
+            for i, choice in enumerate(previous_choices, 1):
                 ability = choice.get('abilityType')
+                choice_text = choice.get('choiceText', '')
+
                 if ability:
                     used_abilities.add(ability)
-                choices_summary += f"- 씬 {choice.get('sceneNumber')}: \"{choice.get('choiceText')}\" ({ability})\n"
+                
+                # 마지막 선택지 저장
+                if i == len(previous_choices):
+                    last_choice_text = choice_text
+                    last_ability_type = ability
+
+                choices_summary += f"- 씬 {choice.get('sceneNumber')}: \"{choice_text}\" ({ability})\n"
+
+            # 마지막 선택의 영향을 명시적으로 표시
+            if last_choice_text and last_ability_type:
+                choices_summary += f"\n**[중요] 방금 아이가 선택한 \"{last_choice_text}\"의 결과가 이번 씬에 반드시 반영되어야 합니다!**\n"
+                choices_summary += f"- {last_ability_type} 능력치를 발휘한 선택이므로, 그에 맞는 긍정적인 결과를 보여주세요.\n"
+                choices_summary += f"- 예: 용기 → 두려움을 극복한 결과, 공감 → 친구가 기뻐하는 모습, 창의성 → 문제가 해결됨 등\n"
 
         # 아직 안 나온 능력치 찾기
         all_abilities = {"용기", "공감", "창의성", "책임감", "우정"}
@@ -389,12 +403,11 @@ class OpenAIService:
         ending_note = ""
         if is_ending:
             ending_note = """
-
-**중요: 이것이 마지막 씬입니다.**
-- 선택지 중 하나는 "이야기를 마치고 돌아가기" 같은 종료 선택지여야 합니다.
-- 스토리를 긍정적으로 마무리하세요.
-- 아이가 배운 교훈을 자연스럽게 담으세요.
-"""
+                        **중요: 이것이 마지막 씬입니다.**
+                        - 선택지 중 하나는 "이야기를 마치고 돌아가기" 같은 종료 선택지여야 합니다.
+                        - 스토리를 긍정적으로 마무리하세요.
+                        - 아이가 배운 교훈을 자연스럽게 담으세요.
+                        """
 
         prompt = f"""
 '{story_title}' 동화의 씬 {scene_number}을 생성해주세요.
@@ -413,13 +426,14 @@ class OpenAIService:
 {story_context or "첫 번째 씬입니다."}
 
 **요구사항:**
-1. {f'**[중요]** 씬 1에서는 반드시 storyTitle을 생성해야 합니다! 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요.' if scene_number == 1 else '이전 스토리에 이어지는 내용으로 작성'}
+1. {f'**[중요]** 씬 1에서는 반드시 storyTitle을 생성해야 합니다! 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요.' if scene_number == 1 else '**[중요]** 이전 씬의 선택 결과가 이번 씬 내용에 명확하게 드러나야 합니다! 아이가 선택한 행동의 결과를 구체적으로 보여주세요.'}
 2. {emotion} 감정을 다루는 따뜻한 이야기
 3. {interests_text} 요소를 포함
-4. 3개의 선택지 제공 (각기 다른 능력치)
-5. **능력치: 용기, 공감, 창의성, 책임감, 우정 중 선택 - 전체 동화에서 5가지 능력치가 골고루 나오도록 다양하게 배치하세요!**
-6. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 한글 문장
-7. 주인공은 동화 속 캐릭터로 설정 (특정 아이 이름 사용 금지
+4. **스토리 연결성**: 아이의 선택이 스토리를 바꿨다는 느낌을 주도록 작성
+5. 3개의 선택지 제공 (각기 다른 능력치, 전체 5가지 골고루 배치)
+6. **선택지 점수**: 10~15점 범위 (일반 10점, 좋음 12점, 매우 좋음 15점)
+7. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 한글 문장
+8. 주인공은 동화 속 캐릭터로 설정 (특정 아이 이름 사용 금지)
 
 {ending_note}
 
@@ -490,6 +504,20 @@ class OpenAIService:
 }}
 """
 
+        # [2025-11-04 김광현] 스토리 작성 팁 추가 (씬 2 이상에서만)
+        story_tips = ""
+        if scene_number > 1 and previous_choices:
+            last_choice = previous_choices[-1] if previous_choices else None
+            if last_choice:
+                last_choice_text = last_choice.get('choiceText', '')
+                story_tips = f"""
+
+**스토리 작성 팁:**
+- 아이의 선택 "{last_choice_text}"의 직접적인 결과를 씬 내용에 포함하세요
+- "네가 [선택한 행동] 덕분에..." 같은 문구로 인과관계를 명확히 하세요
+- 선택지도 이전 선택을 반영한 새로운 상황에서 나와야 합니다
+"""
+
         prompt += f"""
 
 **중요:**
@@ -500,7 +528,7 @@ class OpenAIService:
   예시: "A cute little rabbit standing bravely in a magical forest, children's book illustration style, warm pastel colors, friendly atmosphere, digital art"
 - imagePrompt에는 씬의 주요 장면, 캐릭터, 분위기, 배경을 영어로 상세히 포함하세요
 - 반드시 위 JSON 형식을 정확히 따라주세요!
-
+{story_tips}
 씬 {scene_number}을 JSON 형식으로 생성해주세요!
 """
         
