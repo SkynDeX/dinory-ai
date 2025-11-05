@@ -53,7 +53,7 @@ class ChatbotServiceWithRAG:
         self.use_memory = True  # RAG 기능 on/off
 
         # [2025-11-05 추가] Backend API URL
-        self.spring_api_url = os.getenv("SPRING_API_URL", "http://localhost:8080/api")
+        self.spring_api_url = os.getenv("SPRING_API_URL", "http://localhost:8090/api")
 
     async def generate_response(
         self,
