@@ -60,3 +60,4 @@ htmlcov/
 *.pt
 *.pth
 models/
+NUL
