@@ -315,7 +315,7 @@ class OpenAIService:
             if not scene or not scene.get('sceneNumber'):
                 scene = result
 
-            # ✅ 씬 1인 경우 storyTitle 추출하여 응답에 포함
+            # 씬 1인 경우 storyTitle 추출하여 응답에 포함
             response = {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
             logger.info(f'scene_number={scene_number}, result에 storyTitle 있는지: {result.get("storyTitle")}') 
 
@@ -410,99 +410,116 @@ class OpenAIService:
                         """
 
         prompt = f"""
-'{story_title}' 동화의 씬 {scene_number}을 생성해주세요.
+            '{story_title}' 동화의 씬 {scene_number}을 생성해주세요.
 
-**동화 정보:**
-- 제목: {story_title}
-- 줄거리: {story_description}
-- 주제/감정: {emotion}
-- 관심 요소: {interests_text}
+            **동화 정보:**
+            - 제목: {story_title}
+            - 줄거리: {story_description}
+            - 주제/감정: {emotion}
+            - 관심 요소: {interests_text}
 
-{stage_guide}
+            {stage_guide}
 
-{choices_summary}
+            {choices_summary}
 
-**이전 스토리 흐름:**
-{story_context or "첫 번째 씬입니다."}
+            **이전 스토리 흐름:**
+            {story_context or "첫 번째 씬입니다."}
 
-**요구사항:**
-1. {f'**[중요]** 씬 1에서는 반드시 storyTitle을 생성해야 합니다! 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요.' if scene_number == 1 else '**[중요]** 이전 씬의 선택 결과가 이번 씬 내용에 명확하게 드러나야 합니다! 아이가 선택한 행동의 결과를 구체적으로 보여주세요.'}
-2. {emotion} 감정을 다루는 따뜻한 이야기
-3. {interests_text} 요소를 포함
-4. **스토리 연결성**: 아이의 선택이 스토리를 바꿨다는 느낌을 주도록 작성
-5. 3개의 선택지 제공 (각기 다른 능력치, 전체 5가지 골고루 배치)
-6. **선택지 점수**: 10~15점 범위 (일반 10점, 좋음 12점, 매우 좋음 15점)
-7. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 한글 문장
-8. 주인공은 동화 속 캐릭터로 설정 (특정 아이 이름 사용 금지)
+           **요구사항:**
+            1. {f'**[중요]** 씬 1에서는 반드시 storyTitle을 생성해야 합니다! 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요.' if scene_number == 1 else '**[중요]** 이전 씬의 선택 결과가 이번 씬 내용에 명확하게 드러나야 합니다! 아이가 선택한 행동의 결과를 구체적으로 보여주세요.'}
+            2. {emotion} 감정을 다루는 따뜻한 이야기
+            3. {interests_text} 요소를 포함
+            4. **스토리 연결성**: 아이의 선택이 스토리를 바꿨다는 느낌을 주도록 작성
+            5. **선택지 작성 원칙 (매우 중요!):**
+            - 나쁜 예: "용기를 낸다", "친구에게 도움을 청한다" (너무 추상적)
+            - 좋은 예: "무서워도 큰 나무 위로 올라가본다", "숲 속 다람쥐에게 길을 물어본다" (구체적 행동)
+            - **반드시 현재 씬의 상황에 맞는 구체적인 행동**을 선택지로 제시하세요
+            - 선택지는 "~한다", "~해본다" 형태로 작성
+            - 각 선택지는 **씬 내용에 등장한 요소나 상황을 직접 언급**해야 함
+            - 3개의 선택지는 **서로 다른 능력치**를 대표해야 함 (전체 5가지 골고루 배치)
+            6. **선택지 점수**: 10~15점 범위 (일반적 행동 10점, 적극적 행동 12점, 매우 훌륭한 행동 15점)
+            7. 씬 내용은 3-5문장, 유아가 이해하기 쉬운 한글 문장
+            8. 주인공은 동화 속 캐릭터로 설정 (특정 아이 이름 사용 금지)
+            {ending_note}
 
-{ending_note}
-
-**출력 형식 (JSON):**
-"""
+            **출력 형식 (JSON):**
+            """
 
         if scene_number == 1:
             prompt += f"""
-{{
-    "storyTitle": "동화 제목 (한글로 필수! 예: 용감한 꼬마 호랑이, 친구를 도운 작은 별 등)",
-    "scene": {{
-        "sceneNumber": 1,
-        "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
-        "imagePrompt": "DALL-E용 영어 프롬프트",
-        "choices": [
             {{
-                "choiceId": 101,
-                "choiceText": "선택지 1 텍스트",
-                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
-                "abilityScore": 10-15
-            }},
-            {{
-                "choiceId": 102,
-                "choiceText": "선택지 2 텍스트",
-                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
-                "abilityScore": 10-15
-            }},
-            {{
-                "choiceId": 103,
-                "choiceText": "선택지 3 텍스트",
-                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
-                "abilityScore": 10-15
+                "storyTitle": "동화 제목 (한글로 필수! 예: 용감한 꼬마 호랑이, 친구를 도운 작은 별 등)",
+                "scene": {{
+                    "sceneNumber": 1,
+                    "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
+                    "imagePrompt": "DALL-E용 영어 프롬프트",
+                    "choices": [
+                        {{
+                            "choiceId": 101,
+                            "choiceText": "선택지 1 텍스트",
+                            "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
+                            "abilityScore": 10-15
+                        }},
+                        {{
+                            "choiceId": 102,
+                            "choiceText": "선택지 2 텍스트",
+                            "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
+                            "abilityScore": 10-15
+                        }},
+                        {{
+                            "choiceId": 103,
+                            "choiceText": "선택지 3 텍스트",
+                            "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
+                            "abilityScore": 10-15
+                        }}
+                    ],
+                    "isEnding": false
+                }}
             }}
-        ],
-        "isEnding": false
-    }}
-}}
-"""
+            """
         else:
             prompt += f"""
-{{
-    "scene": {{
-        "sceneNumber": {scene_number},
-        "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
-        "imagePrompt": "DALL-E용 영어 프롬프트",
-        "choices": [
             {{
-                "choiceId": {scene_number * 100 + 1},
-                "choiceText": "선택지 1 텍스트",
-                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
-                "abilityScore": 10-15
-            }},
-            {{
-                "choiceId": {scene_number * 100 + 2},
-                "choiceText": "선택지 2 텍스트",
-                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
-                "abilityScore": 10-15
-            }},
-            {{
-                "choiceId": {scene_number * 100 + 3},
-                "choiceText": "선택지 3 텍스트",
-                "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
-                "abilityScore": 10-15
+                "scene": {{
+                    "sceneNumber": {scene_number},
+                    "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
+                    "imagePrompt": "DALL-E용 영어 프롬프트",
+                    "choices": [
+                        {{
+                            "choiceId": {scene_number * 100 + 1},
+                            "choiceText": "선택지 1 텍스트 (구체적인 행동)",
+                            "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
+                            "abilityScore": 10-15
+                        }},
+                        {{
+                            "choiceId": {scene_number * 100 + 2},
+                            "choiceText": "선택지 2 텍스트 (구체적인 행동)",
+                            "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
+                            "abilityScore": 10-15
+                        }},
+                        {{
+                            "choiceId": {scene_number * 100 + 3},
+                            "choiceText": "선택지 3 텍스트 (구체적인 행동)",
+                            "abilityType": "용기/공감/창의성/책임감/우정 (한글)",
+                            "abilityScore": 10-15
+                        }}
+                    ],
+                    "isEnding": {str(is_ending).lower()}
+                }}
             }}
-        ],
-        "isEnding": {str(is_ending).lower()}
-    }}
-}}
-"""
+            **선택지 작성 예시:**
+            만약 씬 내용이 "작은 토끼가 높은 산을 마주쳤어요. 정상까지 가려면 험한 바위를 올라가야 해요."라면,
+
+            좋은 선택지:
+            - "무서워도 바위를 하나씩 잡고 조심조심 올라간다" (용기, 12점)
+            - "산 아래서 쉬고 있는 친구 거북이에게 함께 가자고 한다" (우정, 12점)
+            - "나뭇가지로 지팡이를 만들어 균형을 잡으며 올라간다" (창의성, 15점)
+
+            나쁜 선택지:
+            - "용기를 낸다" (추상적)
+            - "도움을 청한다" (누구에게? 무엇을?)
+            - "창의적으로 해결한다" (어떻게?)
+            """
 
         # [2025-11-04 김광현] 스토리 작성 팁 추가 (씬 2 이상에서만)
         story_tips = ""
@@ -512,25 +529,25 @@ class OpenAIService:
                 last_choice_text = last_choice.get('choiceText', '')
                 story_tips = f"""
 
-**스토리 작성 팁:**
-- 아이의 선택 "{last_choice_text}"의 직접적인 결과를 씬 내용에 포함하세요
-- "네가 [선택한 행동] 덕분에..." 같은 문구로 인과관계를 명확히 하세요
-- 선택지도 이전 선택을 반영한 새로운 상황에서 나와야 합니다
-"""
+                **스토리 작성 팁:**
+                - 아이의 선택 "{last_choice_text}"의 직접적인 결과를 씬 내용에 포함하세요
+                - "네가 [선택한 행동] 덕분에..." 같은 문구로 인과관계를 명확히 하세요
+                - 선택지도 이전 선택을 반영한 새로운 상황에서 나와야 합니다
+                """
 
         prompt += f"""
 
-**중요:**
-- 씬 1에서는 storyTitle을 **scene 밖에** 별도로 포함해야 합니다!
-- 모든 텍스트는 한글로 작성
-- 동화 제목은 아이가 이해하기 쉬운 한글로 (예: "용감한 작은 토끼", "친구를 도운 꼬마 별")
-- **imagePrompt는 반드시 영어로 작성하고, 씬 내용을 구체적으로 묘사해야 합니다!**
-  예시: "A cute little rabbit standing bravely in a magical forest, children's book illustration style, warm pastel colors, friendly atmosphere, digital art"
-- imagePrompt에는 씬의 주요 장면, 캐릭터, 분위기, 배경을 영어로 상세히 포함하세요
-- 반드시 위 JSON 형식을 정확히 따라주세요!
-{story_tips}
-씬 {scene_number}을 JSON 형식으로 생성해주세요!
-"""
+        **중요:**
+        - 씬 1에서는 storyTitle을 **scene 밖에** 별도로 포함해야 합니다!
+        - 모든 텍스트는 한글로 작성
+        - 동화 제목은 아이가 이해하기 쉬운 한글로 (예: "용감한 작은 토끼", "친구를 도운 꼬마 별")
+        - **imagePrompt는 반드시 영어로 작성하고, 씬 내용을 구체적으로 묘사해야 합니다!**
+        예시: "A cute little rabbit standing bravely in a magical forest, children's book illustration style, warm pastel colors, friendly atmosphere, digital art"
+        - imagePrompt에는 씬의 주요 장면, 캐릭터, 분위기, 배경을 영어로 상세히 포함하세요
+        - 반드시 위 JSON 형식을 정확히 따라주세요!
+        {story_tips}
+        씬 {scene_number}을 JSON 형식으로 생성해주세요!
+        """
         
 
         return prompt

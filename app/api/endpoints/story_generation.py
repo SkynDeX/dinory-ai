@@ -326,79 +326,345 @@ async def generate_next_scene(req: NextSceneRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# @router.post("/analyze-custom-choice")
+# async def analyze_custom_choice(req: AnalyzeCustomChoiceRequest):
+#     logger.info(f"선택 분석 요청: text={req.text}")
+#     try:
+#         # OpenAI를 사용한 정교한 분석
+#         llm = OpenAIService()
+#         if llm and llm.client:
+#             try:
+#                 prompt = f"""
+#                 사용자가 동화에서 입력한 선택지를 분석하여 어떤 능력치가 향상되는지 판단해주세요.
+
+#                 선택지: "{req.text}"
+                                
+#                 **1단계: 부정적 표현 검사**
+#                 다음과 같은 부정적 표현이 포함되어 있는지 확인하세요:
+#                 - 폭력적 표현 (때리기, 죽이기, 부수기, 싸우기)
+#                 - 욕설이나 비속어
+#                 - 타인을 해치는 행동 (괴롭히기, 무시하기, 따돌리기)
+#                 - 극단적으로 부정적인 감정 (미워하기, 싫어하기, 증오하기)
+#                 - 위험한 행동 제안 (불장난, 높은 곳에서 뛰어내리기 등)
+
+#                 **2단계: 능력치 분석 (부정적이지 않은 경우)**
+#                 다음 5가지 능력치 중 가장 적합한 것을 선택하세요:
+#                 - 용기: 두려움을 극복하고 도전하는 행동
+#                 - 공감: 다른 사람의 감정을 이해하고 배려하는 행동
+#                 - 창의성: 새로운 아이디어나 독특한 해결책을 제시하는 행동
+#                 - 책임감: 의무를 다하고 약속을 지키는 행동
+#                 - 우정: 친구와의 관계를 중요시하고 함께하는 행동
+
+#                 **점수 부여 기준:**
+#                 - 매우 창의적이거나 긍정적인 선택: 15점
+#                 - 적절하고 좋은 선택: 12점  
+#                 - 평범하지만 긍정적인 선택: 10점
+
+#                 JSON 형식으로 응답해주세요:
+#                 {{
+#                     "isNegative": true/false,
+#                     "negativeReason": "부정적인 경우 구체적인 이유 (한글로)",
+#                     "feedback": "사용자에게 보여줄 메시지",
+#                     "abilityType": "능력치 이름 (부정적이지 않은 경우)",
+#                     "abilityPoints": 점수 10~15 (부정적이지 않은 경우),
+#                     "reason": "능력치 선정 이유"
+#                 }}
+#                 """
+
+#                 response = llm.client.chat.completions.create(
+#                     model="gpt-4o-mini",
+#                     messages=[{"role": "user", "content": prompt}],
+#                     response_format={"type": "json_object"},
+#                     temperature=0.7
+#                 )
+
+#                 result = json.loads(response.choices[0].message.content)
+
+#                 # 부정문 체크
+#                 is_negative = result.get("isNegative", False)
+
+#                 if is_negative:
+#                     negative_reason = result.get("negativeReason", "")
+#                     feedback = result.get("feedback", "부정적인 표현이 감지되었습니다.")
+#                     logger.info(f"부정문 감지: {req.text} - 이유: {negative_reason}")
+
+#                     return {
+#                         "isNegative": True,
+#                         "feedback": feedback,
+#                         "negativeReason": negative_reason,
+#                         "abilityType": None,
+#                         "abilityPoints": 0
+#                     }
+
+#                 # 긍정적인 경우 능력치 반환
+#                 ability_type = result.get("abilityType", "책임감")
+#                 ability_points = result.get("abilityPoints", 12)  # 기본값 12로 상향
+#                 reason = result.get("reason", "")
+
+#                 # 커스텀 선택지 보너스 +2점(최대는 17점으로 제한함)
+#                 ability_points = min(ability_points + 2, 17)
+
+#                 logger.info(f"AI 분석 결과 (커스텀 보너스 포함): {ability_type} +{ability_points}")
+
+#                 return {
+#                     "isNegative": False,
+#                     "abilityType": ability_type,
+#                     "abilityPoints": ability_points,
+#                     "feedback": f"와! 정말 멋진 선택이에요! {ability_type} 능력이 크게 성장했어요 (+{ability_points}점)"
+#                 }
+
+#             except Exception as e:
+#                 logger.warning(f"OpenAI 분석 실패, 폴백 사용: {e}")
+#                 # 폴백으로 기존 키워드 매칭 사용
+
+#                 # 폴백: 키워드 매칭
+#                 txt = req.text.lower()
+
+#                 # 부정적 키워드 체크
+#                 negative_keywords = [
+#                     # 폭력/공격
+#                     "때리", "패", "죽이", "죽여", "부수", "찌르", "찔러", "폭행", "폭력",
+#                     "싸우", "싸움", "밀치", "발로", "주먹", "때림", "혼내", "혼낼",
+#                     "덤벼", "때릴", "때렸", "찌를", "차버", "발로차", "하대",
+
+#                     # 괴롭힘/왕따
+#                     "괴롭히", "놀려", "놀림", "비웃", "무시", "따돌리", "왕따", "업신",
+#                     "멸시", "따돌림", "깎아내", "욕보",
+
+#                     # 욕설/비하
+#                     "욕", "쌍욕", "욕설", "나쁜말", "바보", "멍청", "멍청이", "미친",
+#                     "또라이", "변태", "바보야", "멍청아", "쓰레기", "개같", "개색", 
+#                     "하찮", "저질", "재수없", "못생", "뚱뚱", "게으르",
+
+#                     # 미움/증오
+#                     "미워", "싫어", "증오", "저주", "혐오", "싫다", "미워하",
+
+#                     # 명령형 / 공격 의도 표현
+#                     "죽어", "꺼져", "사라져", "입닥쳐", "닥쳐", "조용히해", "가버려",
+
+#                     # 약한 욕/아이들이 자주 쓰는 표현
+#                     "바보같", "멍텅", "멍청", "멍청하", "멍충", "멍텅구리",
+#                     "못해", "못하", "너때문", "이상해", "무식",
+
+#                     # 줄임/변형 표현 (필터링용)
+#                     "ㅂㅅ", "ㅅㅂ", "ㅈㄹ", "ㄷㅊ", "ㅁㅊ", "미쳣", "미첬", "븅",
+#                 ]
+
+#                 if any(k in txt for k in negative_keywords):
+#                     return {
+#                         "isNegative": True,
+#                         "feedback": "친구를 존중하고 배려하는 선택을 해보면 어떨까요?",
+#                         "negativeReason": "부정적인 표현이 포함되어 있습니다",
+#                         "abilityType": None,
+#                         "abilityPoints": 0
+#                     }
+
+#                 # 긍정적인 경우 기존 로직 (점수 상향)
+#                 if any(k in txt for k in ["용기", "brave", "courage", "도전", "혼자", "앞으로"]):
+#                     ability, pts = "용기", 12
+#                 elif any(k in txt for k in ["친구", "friend", "우정", "같이", "함께"]):
+#                     ability, pts = "우정", 12
+#                 elif any(k in txt for k in ["아이디어", "idea", "창의", "발명", "만들"]):
+#                     ability, pts = "창의성", 12
+#                 elif any(k in txt for k in ["공감", "empathy", "이해", "위로", "도와"]):
+#                     ability, pts = "공감", 12
+#                 else:
+#                     ability, pts = "책임감", 10
+
+#                 feedback = f"스스로 생각한 선택이 정말 훌륭해요! {ability} 능력이 크게 성장했어요 (+{pts}점)"
+#                 logger.info(f"키워드 매칭 결과: ability={ability}, pts={pts}")
+#                 return {"abilityType": ability, "abilityPoints": pts, "feedback": feedback}
+                        
+#     except Exception as e:
+#         logger.error(f"analyze-custom-choice 실패: {e}\n{traceback.format_exc()}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/analyze-custom-choice")
 async def analyze_custom_choice(req: AnalyzeCustomChoiceRequest):
     logger.info(f"선택 분석 요청: text={req.text}")
+
+    txt = req.text.lower()
+
+    PRODUCTION_PROMPT = f"""
+        당신은 어린이 동화 속 선택지를 분석하는 전문 평가자입니다.
+        사용자가 입력한 선택지가 어떤 능력치와 관련되는지 정확하게 판단하세요.
+
+        # 1단계: 부정적 표현 여부 판단
+        다음 범주에 해당하면 무조건 "isNegative": true 로 처리하세요.
+
+        ## [부정 표현 기준]
+        - 폭력: 때리기, 죽이기, 패기, 부수기, 찌르기, 위협하기 등
+        - 괴롭힘: 놀리기, 비웃기, 무시하기, 따돌리기
+        - 욕설/비하: 욕설, 비속어, 모욕, 심한 비난
+        - 감정적 공격: 미워하기, 싫어하기, 증오, 혐오, 저주
+        - 위험한 행동: 불장난, 뛰어내리기, 위험 유도
+
+        부정적이면 즉시:
+        {{
+            "isNegative": true,
+            "negativeReason": "왜 부정인지 한 문장으로 설명",
+            "feedback": "아이에게 부드럽게 안내하는 문장"
+        }}
+        만 출력하세요.
+
+        # 2단계: 긍정 능력 판단 (부정이 아닌 경우만)
+        다음 5가지 중 가장 적합한 능력을 선택하세요.
+
+        ### 용기 (Courage)
+        - 두려움 극복 / 도전 / 첫걸음 / 혼자 시도
+        ### 공감 (Empathy)
+        - 이해 / 위로 / 배려 / 감정 공감
+        ### 창의성 (Creativity)
+        - 아이디어 / 발명 / 새로운 시도 / 독창적 해결
+        ### 책임감 (Responsibility)
+        - 스스로 해결 / 약속 / 정리 / 맡은 일 수행
+        ### 우정 (Friendship)
+        - 친구와 협력 / 함께하기 / 관계 유지
+
+        # 점수 규칙:
+        - 매우 훌륭한 선택 → 15점
+        - 명확하게 긍정적인 선택 → 12점
+        - 기본적으로 괜찮은 선택 → 10점
+
+        # 출력(JSON만)
+        {{
+        "isNegative": false,
+        "abilityType": "능력 1개",
+        "abilityPoints": 10~15 정수,
+        "reason": "이 능력치를 선택한 이유",
+        "feedback": "아이에게 보여줄 칭찬 문장"
+        }}
+
+        선택지: "{req.text}"
+        """
+
+    NEGATIVE_KEYWORDS = {
+        "strong": [
+            "죽이", "죽여", "패버", "패주", "패죽", "찌르", "폭행", "부숴",
+            "욕해", "욕함", "ㅅㅂ", "ㅈㄹ", "개새", "sex", "죽어"
+        ],
+        "medium": [
+            "때리", "패", "싸우", "밀치", "주먹", "혼내", "놀림", "따돌",
+            "비웃", "변태", "쓰레기", "혐오", "증오", "미워"
+        ],
+        "weak": [
+            "바보", "멍청", "못생", "뚱뚱", "이상해", "무식", "재수없",
+            "싫어", "싫다", "미워하", "하찮", "저질", "므흣"
+        ]
+    }
+
+    POSITIVE_KEYWORDS = {
+        "용기": {
+            "strong": ["도전", "용감", "두렵지만", "첫걸음", "해볼게", "포기하지"],
+            "medium": ["용기", "brave", "혼자서", "앞으로 나아"],
+            "weak": ["시도", "가볼게", "해볼까", "무서워도"]
+        },
+        "공감": {
+            "strong": ["위로해", "마음 알아", "힘들었겠다", "슬펐겠다", "배려해"],
+            "medium": ["공감", "이해해", "empathy", "도와줄게"],
+            "weak": ["괜찮아", "힘내", "도와"]
+        },
+        "창의성": {
+            "strong": ["새로운 아이디어", "발명", "창조해", "기발한"],
+            "medium": ["아이디어", "창의", "독창", "상상"],
+            "weak": ["생각해냈", "만들어"]
+        },
+        "책임감": {
+            "strong": ["약속 지킬게", "맡은 일", "스스로 해결"],
+            "medium": ["정리했", "정리할게", "책임감", "챙겨"],
+            "weak": ["스스로", "도와줄게"]
+        },
+        "우정": {
+            "strong": ["같이 도와", "함께 해결", "친구 지켜", "협력했어"],
+            "medium": ["친구", "friend", "우정", "함께", "같이"],
+            "weak": ["같아", "둘이서"]
+        }
+    }
+
+    # 1) 부정 키워드 폴백 체크 (LLM 실패 대비)
+    def check_negative(text: str):
+        for level, keywords in NEGATIVE_KEYWORDS.items():
+            if any(k in text for k in keywords):
+                return True, level
+        return False, None
+
+    # 2) 긍정 키워드 매칭
+    def match_positive(text: str):
+        for ability, levels in POSITIVE_KEYWORDS.items():
+            if any(k in text for k in levels["strong"]):
+                return ability, 12, "strong"
+            if any(k in text for k in levels["medium"]):
+                return ability, 10, "medium"
+            if any(k in text for k in levels["weak"]):
+                return ability, 8, "weak"
+        return "책임감", 10, "fallback"
+
     try:
-        # OpenAI를 사용한 정교한 분석
         llm = OpenAIService()
         if llm and llm.client:
             try:
-                prompt = f"""
-                사용자가 동화에서 입력한 선택지를 분석하여 어떤 능력치가 향상되는지 판단해주세요.
+                prompt = PRODUCTION_PROMPT
 
-                선택지: "{req.text}"
-
-                다음 5가지 능력치 중 가장 적합한 것을 선택하세요:
-                - 용기: 두려움을 극복하고 도전하는 행동 (예: 혼자 해결, 앞으로 나아가기, 시도하기)
-                - 공감: 다른 사람의 감정을 이해하고 배려하는 행동 (예: 위로하기, 도와주기, 함께 슬퍼하기)
-                - 창의성: 새로운 아이디어나 독특한 해결책을 제시하는 행동 (예: 발명, 다른 방법 시도, 상상력)
-                - 책임감: 의무를 다하고 약속을 지키는 행동 (예: 청소하기, 약속 지키기, 맡은 일 완수)
-                - 우정: 친구와의 관계를 중요시하고 함께하는 행동 (예: 친구 찾기, 같이 놀기, 도움 요청)
-
-                JSON 형식으로 응답해주세요:
-                {{
-                "abilityType": "능력치 이름 (용기/공감/창의성/책임감/우정)",
-                "abilityPoints": 점수 (1~3),
-                "reason": "이유 설명"
-                }}
-                """
-                
                 response = llm.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                     response_format={"type": "json_object"},
                     temperature=0.7
                 )
-                
+
                 result = json.loads(response.choices[0].message.content)
+
+                # 부정일 경우 바로 반환
+                if result.get("isNegative", False):
+                    return {
+                        "isNegative": True,
+                        "negativeReason": result.get("negativeReason", ""),
+                        "feedback": result.get("feedback", "부정적인 표현이 있어요!"),
+                        "abilityType": None,
+                        "abilityPoints": 0
+                    }
+
+                # 긍정 결과 + 커스텀 보너스
                 ability_type = result.get("abilityType", "책임감")
-                ability_points = result.get("abilityPoints", 2)
-                reason = result.get("reason", "")
-                
-                feedback = f"'{req.text}' → {ability_type} +{ability_points} ({reason})"
-                logger.info(f"AI 분석 결과: {ability_type} +{ability_points}")
-                
+                ability_points = min(result.get("abilityPoints", 12) + 2, 17)
+
                 return {
+                    "isNegative": False,
                     "abilityType": ability_type,
                     "abilityPoints": ability_points,
-                    "feedback": feedback
+                    "feedback": result.get(
+                        "feedback",
+                        f"정말 멋진 선택이에요! {ability_type} 능력이 자랐어요."
+                    )
                 }
-                
-            except Exception as e:
-                logger.warning(f"OpenAI 분석 실패, 폴백 사용: {e}")
-                # 폴백으로 기존 키워드 매칭 사용
-        
-        # 폴백: 키워드 매칭
-        txt = req.text.lower()
-        if any(k in txt for k in ["용기", "brave", "courage", "도전", "혼자", "앞으로"]):
-            ability, pts = "용기", 2
-        elif any(k in txt for k in ["친구", "friend", "우정", "같이", "함께"]):
-            ability, pts = "우정", 2
-        elif any(k in txt for k in ["아이디어", "idea", "창의", "발명", "만들"]):
-            ability, pts = "창의성", 2
-        elif any(k in txt for k in ["공감", "empathy", "이해", "위로", "도와"]):
-            ability, pts = "공감", 2
-        else:
-            ability, pts = "책임감", 1
 
-        feedback = f"선택이 {ability}에 긍정적 영향을 줍니다. +{pts}"
-        logger.info(f"키워드 매칭 결과: ability={ability}, pts={pts}")
-        return {"abilityType": ability, "abilityPoints": pts, "feedback": feedback}
-        
+            except Exception as e:
+                logger.warning(f"OpenAI 분석 실패 → 폴백 적용: {e}")
+
     except Exception as e:
-        logger.error(f"analyze-custom-choice 실패: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"LLM 초기화 실패 → 폴백 사용: {e}")
+
+    # LLM 실패 시 — 강력한 폴백 로직
+    is_neg, level = check_negative(txt)
+    if is_neg:
+        return {
+            "isNegative": True,
+            "negativeReason": f"{level} 수준의 부정적 표현 포함",
+            "feedback": "친구를 존중하고 배려하는 선택을 해보면 좋겠어요!",
+            "abilityType": None,
+            "abilityPoints": 0
+        }
+
+    ability, base_pts, intensity = match_positive(txt)
+    pts = base_pts + 2  # 커스텀 선택 보너스
+    pts = min(pts, 17)
+
+    return {
+        "isNegative": False,
+        "abilityType": ability,
+        "abilityPoints": pts,
+        "feedback": f"멋진 선택이에요! {ability} 능력이 자랐어요 (+{pts}점)"
+    }
 
 
 @router.post("/generate-image")
@@ -450,10 +716,10 @@ async def create_image_prompt(req: CreateImagePromptRequest):
 
                 # [2025-11-05 김민중 수정] 일관된 anime style 적용 및 캐릭터 일관성 강화
                 prompt = f"""
-다음 한글 동화 내용을 이미지 생성 AI(PollinationAI)가 이해할 수 있는 짧고 효과적인 영어 프롬프트로 변환해주세요.
+                다음 한글 동화 내용을 이미지 생성 AI(PollinationAI)가 이해할 수 있는 짧고 효과적인 영어 프롬프트로 변환해주세요.
 
-**한글 동화 내용:**
-{req.koreanText}
+                **한글 동화 내용:**
+                {req.koreanText}
 
 **요구사항:**
 1. 핵심 시각적 요소만 추출 (캐릭터, 배경, 분위기, 행동)
@@ -483,8 +749,8 @@ async def create_image_prompt(req: CreateImagePromptRequest):
     "keyElements": ["주요 요소1", "주요 요소2", "주요 요소3"]
 }}
 
-JSON 형식으로 응답해주세요.
-"""
+                JSON 형식으로 응답해주세요.
+                """
 
                 # [2025-11-05 김민중 수정] 시스템 프롬프트에 캐릭터 일관성 강조
                 response = llm.client.chat.completions.create(
