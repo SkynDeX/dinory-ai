@@ -6,6 +6,7 @@ Enhanced Chatbot Service with RAG Memory
 import os
 from typing import Optional, Dict, Any, List
 from openai import AsyncOpenAI
+import httpx
 from app.services.chat.memory_service import MemoryService
 
 
@@ -51,6 +52,9 @@ class ChatbotServiceWithRAG:
         self.memory_service = MemoryService(use_pinecone=use_pinecone)
         self.use_memory = True  # RAG 기능 on/off
 
+        # [2025-11-05 추가] Backend API URL
+        self.spring_api_url = os.getenv("SPRING_API_URL", "http://localhost:8080/api")
+
     async def generate_response(
         self,
         message: str,
@@ -92,7 +96,7 @@ class ChatbotServiceWithRAG:
                 model=self.model,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=200
+                max_tokens=400  # 장면 내용 전달을 위해 증가
             )
 
             ai_response = response.choices[0].message.content
@@ -109,6 +113,52 @@ class ChatbotServiceWithRAG:
             print(f"Error generating response: {e}")
             return "죄송해요, 잠시 후에 다시 이야기해요!"
 
+    async def _load_story_context_from_backend(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """
+        [2025-11-05 추가] 백엔드 API에서 세션의 story_completion 정보를 가져와서 story_context 복원
+        """
+        try:
+            print(f"★ [LoadStoryContext] 백엔드에서 story_context 로드 시도: session_id={session_id}")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.spring_api_url}/chat/{session_id}/story-completion"
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                # StoryCompletionSummaryDto를 story_context 형식으로 변환
+                story_context = {
+                    "story_title": data.get("storyTitle", ""),
+                    "story_id": str(data.get("storyId", "")),
+                    "abilities": {
+                        "courage": data.get("totalCourage", 0),
+                        "empathy": data.get("totalEmpathy", 0),
+                        "creativity": data.get("totalCreativity", 0),
+                        "responsibility": data.get("totalResponsibility", 0),
+                        "friendship": data.get("totalFriendship", 0)
+                    },
+                    "choices": data.get("choices", []),
+                    "scenes": data.get("scenes", [])
+                }
+
+                # 메모리에 저장
+                self.story_context[session_id] = story_context
+                print(f"✅ [LoadStoryContext] story_context 로드 완료: {story_context['story_title']}")
+                print(f"   - choices: {len(story_context['choices'])}개")
+                print(f"   - scenes: {len(story_context['scenes'])}개")
+
+                return story_context
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                print(f"ℹ️ [LoadStoryContext] 이 세션은 story_completion과 연결되지 않음")
+            else:
+                print(f"❌ [LoadStoryContext] HTTP 오류: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ [LoadStoryContext] 로드 실패: {e}")
+            return None
+
     async def _build_system_prompt(
         self,
         session_id: int,
@@ -122,18 +172,67 @@ class ChatbotServiceWithRAG:
 
         # 1. 동화 컨텍스트 (현재 세션에 동화 정보가 있으면)
         story_context_text = ""
+
+        # [2025-11-05 추가] story_context가 없으면 백엔드에서 로드 시도
+        if session_id not in self.story_context:
+            await self._load_story_context_from_backend(session_id)
+
         if session_id in self.story_context:
             story_info = self.story_context[session_id]
             ability_details = self._format_ability_details(story_info["abilities"])
+
+            # [2025-11-04 김민중 수정] Scene 정보 포맷팅 추가
+            scenes_text = ""
+            if story_info.get("scenes"):
+                print(f"★ [BuildPrompt] scenes 있음: {len(story_info['scenes'])}개")
+                scenes_text = "\n\n**동화 장면별 내용:**\n"
+                for scene in story_info["scenes"]:
+                    scene_num = scene.get("sceneNumber", "?")
+                    content = scene.get("content", "")
+                    print(f"★ [BuildPrompt] Scene {scene_num}: content 길이={len(content)}")
+                    scenes_text += f"  {scene_num}번째 장면: {content}\n"
+            else:
+                print(f"★ [BuildPrompt] scenes 없음! story_info keys={list(story_info.keys())}")
+
+            # [2025-11-05 수정] Choices 정보 포맷팅 추가
+            choices_text = ""
+            if story_info.get("choices"):
+                print(f"★ [BuildPrompt] choices 있음: {len(story_info['choices'])}개")
+                choices_text = "\n\n**아이가 선택한 내용:**\n"
+                for choice in story_info["choices"]:
+                    scene_num = choice.get("sceneNumber", "?")
+                    choice_text = choice.get("choiceText", "")
+                    ability_type = choice.get("abilityType", "")
+                    ability_points = choice.get("abilityPoints", 0)
+                    # 능력 타입을 한글로 변환
+                    ability_map = {
+                        "courage": "용기",
+                        "empathy": "공감",
+                        "creativity": "창의성",
+                        "responsibility": "책임감",
+                        "friendship": "우정"
+                    }
+                    ability_kr = ability_map.get(ability_type, ability_type)
+                    choices_text += f"  {scene_num}번째 장면: \"{choice_text}\" ({ability_kr} +{ability_points})\n"
+            else:
+                print(f"★ [BuildPrompt] choices 없음!")
 
             story_context_text = f"""
 **동화 정보:**
 - 동화 제목: '{story_info["story_title"]}'
 - 획득한 능력치:
 {ability_details}
-
+{choices_text}
+{scenes_text}
 **중요 지침:**
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
+- 아이가 "몇 번째 장면에서 무슨 선택했어?", "X번째 장면 선택지" 등을 물어보면:
+  * 위에 나와있는 "아이가 선택한 내용"에서 해당 장면 번호의 선택을 **정확히 그대로** 알려주세요
+  * 선택지 텍스트와 획득한 능력을 함께 알려주세요
+- 아이가 "몇 번째 장면", "장면 내용", "장면 content", "X번째 장면" 등을 물어보면:
+  * 위에 나와있는 해당 장면의 content를 **정확히 그대로** 알려주세요
+  * 요약하지 말고 원문 그대로 전달하세요
+  * "자세히 보려고 노력하는 장면" 같은 추상적인 설명 대신, 실제 content를 그대로 읽어주세요
 - 동화 내용과 연관지어 대화하세요
 """
 
@@ -173,6 +272,13 @@ class ChatbotServiceWithRAG:
 5. 아이의 생각과 감정을 더 이끌어내는 질문을 하세요
 """.strip()
 
+        # 디버그: 프롬프트 길이 확인
+        print(f"★ [BuildPrompt] 최종 프롬프트 길이: {len(enhanced_prompt)} 문자")
+        if "동화 장면별 내용" in enhanced_prompt:
+            print(f"★ [BuildPrompt] ✅ 프롬프트에 '동화 장면별 내용' 포함됨")
+        else:
+            print(f"★ [BuildPrompt] ❌ 프롬프트에 '동화 장면별 내용' 없음!")
+
         return enhanced_prompt
 
     async def generate_first_message_from_story(
@@ -196,6 +302,10 @@ class ChatbotServiceWithRAG:
             self.conversation_history[session_id] = []
 
         # [2025-11-04 김민중 수정] 동화 컨텍스트 저장 (scenes 포함)
+        print(f"★ [FirstMessage] scenes 파라미터 수신: {len(scenes) if scenes else 0}개")
+        if scenes:
+            print(f"★ [FirstMessage] 첫 번째 scene: sceneNumber={scenes[0].get('sceneNumber')}, content 길이={len(scenes[0].get('content', ''))}")
+
         self.story_context[session_id] = {
             "story_title": story_title,
             "story_id": story_id,
@@ -203,6 +313,8 @@ class ChatbotServiceWithRAG:
             "choices": choices,
             "scenes": scenes or []  # Scene 정보 추가
         }
+
+        print(f"★ [FirstMessage] story_context 저장 완료: scenes={len(self.story_context[session_id]['scenes'])}개")
 
         # 능력치 분석
         ability_details = self._format_ability_details(abilities)
@@ -228,7 +340,10 @@ class ChatbotServiceWithRAG:
 {scenes_text}
 **중요 지침:**
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
-- 아이가 "몇 번째 장면", "장면 내용" 등을 물어보면 위 장면 정보를 참고하여 답변하세요
+- 아이가 "몇 번째 장면", "장면 내용", "장면 content", "X번째 장면" 등을 물어보면:
+  * 위에 나와있는 해당 장면의 content를 **정확히 그대로** 알려주세요
+  * 요약하지 말고 원문 그대로 전달하세요
+  * "자세히 보려고 노력하는 장면" 같은 추상적인 설명 대신, 실제 content를 그대로 읽어주세요
 - 동화 내용과 연관지어 대화하세요
 - 아이가 "동화 추천해줘", "다른 동화 알려줘" 같은 요청을 하면, 동화 추천 의도를 감지하고 추천해주세요
 
@@ -256,7 +371,7 @@ class ChatbotServiceWithRAG:
                 model=self.model,
                 messages=messages,
                 temperature=0.8,
-                max_tokens=150
+                max_tokens=300  # 장면 내용 전달을 위해 증가
             )
 
             first_message = response.choices[0].message.content

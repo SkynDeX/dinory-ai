@@ -1,6 +1,7 @@
 import os
 from typing import Optional, Dict, Any, List
 from openai import AsyncOpenAI
+import httpx
 
 
 class ChatbotService:
@@ -23,6 +24,8 @@ class ChatbotService:
         self.conversation_history = {}
         # 세션별 동화 컨텍스트 저장
         self.story_context = {}
+        # [2025-11-05 추가] Backend API URL
+        self.spring_api_url = os.getenv("SPRING_API_URL", "http://localhost:8080/api")
 
     async def generate_response(
         self,
@@ -50,6 +53,10 @@ class ChatbotService:
 
         # OpenAI API 호출
         try:
+            # [2025-11-05 추가] story_context가 없으면 백엔드에서 로드 시도
+            if session_id not in self.story_context:
+                await self._load_story_context_from_backend(session_id)
+
             # 동화 컨텍스트가 있으면 시스템 프롬프트에 추가
             system_prompt = self.system_prompt
             if session_id in self.story_context:
@@ -176,6 +183,26 @@ class ChatbotService:
                 short_content = content[:200] + "..." if len(content) > 200 else content
                 scenes_text += f"  {scene_num}번째 장면: {short_content}\n"
 
+        # [2025-11-05 수정] Choices 정보 포맷팅 추가
+        choices_text = ""
+        if choices:
+            choices_text = "\n**아이가 선택한 내용:**\n"
+            for choice in choices:
+                scene_num = choice.get("sceneNumber", "?")
+                choice_text = choice.get("choiceText", "")
+                ability_type = choice.get("abilityType", "")
+                ability_points = choice.get("abilityPoints", 0)
+                # 능력 타입을 한글로 변환
+                ability_map = {
+                    "courage": "용기",
+                    "empathy": "공감",
+                    "creativity": "창의성",
+                    "responsibility": "책임감",
+                    "friendship": "우정"
+                }
+                ability_kr = ability_map.get(ability_type, ability_type)
+                choices_text += f"  {scene_num}번째 장면: \"{choice_text}\" ({ability_kr} +{ability_points})\n"
+
         # 동화별 맞춤 시스템 프롬프트 생성
         story_aware_prompt = f"""
 당신은 아이들을 위한 친절하고 따뜻한 AI 친구 '디노'입니다.
@@ -184,9 +211,13 @@ class ChatbotService:
 
 **획득한 능력치:**
 {ability_details}
+{choices_text}
 {scenes_text}
 **중요 지침:**
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
+- 아이가 "몇 번째 장면에서 무슨 선택했어?", "X번째 장면 선택지" 등을 물어보면:
+  * 위에 나와있는 "아이가 선택한 내용"에서 해당 장면 번호의 선택을 **정확히 그대로** 알려주세요
+  * 선택지 텍스트와 획득한 능력을 함께 알려주세요
 - 아이가 "몇 번째 장면", "장면 내용" 등을 물어보면 위 장면 정보를 참고하여 답변하세요
 - 동화 내용과 연관지어 대화하세요
 - 아이가 "동화 추천해줘", "다른 동화 알려줘" 같은 요청을 하면, 동화 추천 의도를 감지하고 추천해주세요
@@ -354,3 +385,49 @@ class ChatbotService:
                 "choices": ["더 알려줘", "다른 이야기"],
                 "emotion": "neutral"
             }
+
+    async def _load_story_context_from_backend(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """
+        [2025-11-05 추가] 백엔드 API에서 세션의 story_completion 정보를 가져와서 story_context 복원
+        """
+        try:
+            print(f"★ [LoadStoryContext] 백엔드에서 story_context 로드 시도: session_id={session_id}")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.spring_api_url}/chat/{session_id}/story-completion"
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                # StoryCompletionSummaryDto를 story_context 형식으로 변환
+                story_context = {
+                    "story_title": data.get("storyTitle", ""),
+                    "story_id": str(data.get("storyId", "")),
+                    "abilities": {
+                        "courage": data.get("totalCourage", 0),
+                        "empathy": data.get("totalEmpathy", 0),
+                        "creativity": data.get("totalCreativity", 0),
+                        "responsibility": data.get("totalResponsibility", 0),
+                        "friendship": data.get("totalFriendship", 0)
+                    },
+                    "choices": data.get("choices", []),
+                    "scenes": data.get("scenes", [])
+                }
+
+                # 메모리에 저장
+                self.story_context[session_id] = story_context
+                print(f"✅ [LoadStoryContext] story_context 로드 완료: {story_context['story_title']}")
+                print(f"   - choices: {len(story_context['choices'])}개")
+                print(f"   - scenes: {len(story_context['scenes'])}개")
+
+                return story_context
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                print(f"ℹ️ [LoadStoryContext] 이 세션은 story_completion과 연결되지 않음")
+            else:
+                print(f"❌ [LoadStoryContext] HTTP 오류: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ [LoadStoryContext] 로드 실패: {e}")
+            return None
