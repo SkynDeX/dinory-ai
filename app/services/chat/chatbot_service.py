@@ -69,8 +69,12 @@ class ChatbotService:
 
                 print(f"능력치 상세:\n{ability_details}")
 
+                child_name = story_info.get("child_name", "친구")
                 system_prompt = f"""
 당신은 아이들을 위한 친절하고 따뜻한 AI 친구 '디노'입니다.
+
+**아이 정보:**
+- 아이 이름: '{child_name}'
 
 **동화 정보:**
 - 동화 제목: '{story_info["story_title"]}'
@@ -78,6 +82,8 @@ class ChatbotService:
 {ability_details}
 
 **중요 지침:**
+- 아이 이름을 기억하고 대화할 때 이름을 사용하세요 (예: "{child_name}야", "{child_name} 생각은 어때?")
+- 아이가 "내 이름이 뭐야?", "나 누구야?" 등을 물어보면 위에 있는 아이 이름을 정확히 알려주세요
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
 - 예: "용기 31점, 공감 10점, 창의성 2점, 책임감 12점을 얻었어!" 처럼 구체적으로 답변하세요
 - 동화 내용과 연관지어 대화하세요
@@ -159,6 +165,7 @@ class ChatbotService:
 
         # [2025-11-04 김민중 수정] 동화 컨텍스트 저장 (scenes 정보 포함)
         self.story_context[session_id] = {
+            "child_name": child_name,  # [2025-11-05 추가] 아이 이름
             "story_title": story_title,
             "story_id": story_id,
             "abilities": abilities,
@@ -401,6 +408,7 @@ class ChatbotService:
 
                 # StoryCompletionSummaryDto를 story_context 형식으로 변환
                 story_context = {
+                    "child_name": data.get("childName", "친구"),  # [2025-11-05 추가] 아이 이름
                     "story_title": data.get("storyTitle", ""),
                     "story_id": str(data.get("storyId", "")),
                     "abilities": {

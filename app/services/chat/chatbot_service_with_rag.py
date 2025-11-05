@@ -128,6 +128,7 @@ class ChatbotServiceWithRAG:
 
                 # StoryCompletionSummaryDto를 story_context 형식으로 변환
                 story_context = {
+                    "child_name": data.get("childName", "친구"),  # [2025-11-05 추가] 아이 이름
                     "story_title": data.get("storyTitle", ""),
                     "story_id": str(data.get("storyId", "")),
                     "abilities": {
@@ -218,6 +219,9 @@ class ChatbotServiceWithRAG:
                 print(f"★ [BuildPrompt] choices 없음!")
 
             story_context_text = f"""
+**아이 정보:**
+- 아이 이름: '{story_info.get("child_name", "친구")}'
+
 **동화 정보:**
 - 동화 제목: '{story_info["story_title"]}'
 - 획득한 능력치:
@@ -225,6 +229,8 @@ class ChatbotServiceWithRAG:
 {choices_text}
 {scenes_text}
 **중요 지침:**
+- 아이 이름을 기억하고 대화할 때 이름을 사용하세요 (예: "{story_info.get('child_name', '친구')}야", "{story_info.get('child_name', '친구')} 생각은 어때?")
+- 아이가 "내 이름이 뭐야?", "나 누구야?" 등을 물어보면 위에 있는 아이 이름을 정확히 알려주세요
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
 - 아이가 "몇 번째 장면에서 무슨 선택했어?", "X번째 장면 선택지" 등을 물어보면:
   * 위에 나와있는 "아이가 선택한 내용"에서 해당 장면 번호의 선택을 **정확히 그대로** 알려주세요
@@ -307,6 +313,7 @@ class ChatbotServiceWithRAG:
             print(f"★ [FirstMessage] 첫 번째 scene: sceneNumber={scenes[0].get('sceneNumber')}, content 길이={len(scenes[0].get('content', ''))}")
 
         self.story_context[session_id] = {
+            "child_name": child_name,  # [2025-11-05 추가] 아이 이름
             "story_title": story_title,
             "story_id": story_id,
             "abilities": abilities,

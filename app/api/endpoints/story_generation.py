@@ -448,6 +448,7 @@ async def create_image_prompt(req: CreateImagePromptRequest):
             try:
                 llm = OpenAIService()
 
+                # [2025-11-05 김민중 수정] 일관된 anime style 적용 및 캐릭터 일관성 강화
                 prompt = f"""
 다음 한글 동화 내용을 이미지 생성 AI(PollinationAI)가 이해할 수 있는 짧고 효과적인 영어 프롬프트로 변환해주세요.
 
@@ -457,39 +458,72 @@ async def create_image_prompt(req: CreateImagePromptRequest):
 **요구사항:**
 1. 핵심 시각적 요소만 추출 (캐릭터, 배경, 분위기, 행동)
 2. 최대 {req.maxLength}자 이내의 영어로 작성
-3. 어린이 동화책 일러스트레이션 스타일 명시
-4. 구체적이고 명확한 묘사
-5. PollinationAI가 이해하기 쉬운 간결한 문장
+3. **필수 스타일**: 반드시 "consistent anime art style, Studio Ghibli inspired, kawaii" 포함
+4. **캐릭터 일관성 (매우 중요)**:
+   - 주인공 캐릭터는 매번 동일하게 묘사: "same character design"
+   - 외모를 구체적으로 고정: "a cute child with [구체적 특징]"
+   - 예: "a cute little child with round face and big eyes" (이 설명을 모든 장면에서 반복)
+5. **금지 사항**: realistic, photorealistic, real photo, 3D render 같은 실사/3D 스타일 절대 사용 금지
+6. **색상 일관성**: "soft pastel color palette, consistent color scheme" 반드시 포함
+7. PollinationAI가 이해하기 쉬운 간결한 문장
 
 **좋은 예시:**
-- "A cute little rabbit bravely walking through a magical forest, warm pastel colors, children's book illustration style"
-- "A young boy helping a small bird with a broken wing, gentle and caring atmosphere, watercolor style"
+- "A cute child with round face walking through a magical forest, consistent anime art style, Studio Ghibli inspired, kawaii, soft pastel colors"
+- "A cute child with round face helping a small bird, same character design, anime style, gentle atmosphere, consistent color scheme"
+
+**나쁜 예시 (사용 금지):**
+- "realistic portrait" ❌
+- "photorealistic rendering" ❌
+- "3D cartoon style" ❌
+- "different character design" ❌
 
 **출력 형식 (JSON):**
 {{
-    "imagePrompt": "영어 프롬프트 (최대 {req.maxLength}자)",
+    "imagePrompt": "영어 프롬프트 (최대 {req.maxLength}자, 반드시 consistent anime art style 포함)",
     "keyElements": ["주요 요소1", "주요 요소2", "주요 요소3"]
 }}
 
 JSON 형식으로 응답해주세요.
 """
 
+                # [2025-11-05 김민중 수정] 시스템 프롬프트에 캐릭터 일관성 강조
                 response = llm.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
-                            "content": "당신은 이미지 프롬프트 작성 전문가입니다. 한글 텍스트에서 핵심 시각적 요소를 추출하여 짧고 효과적인 영어 프롬프트를 만듭니다."
+                            "content": "당신은 Studio Ghibli 스타일 애니메이션 이미지 프롬프트 작성 전문가입니다. 한글 텍스트에서 핵심 시각적 요소를 추출하여 짧고 효과적인 영어 프롬프트를 만듭니다. 반드시 'consistent anime art style, Studio Ghibli inspired, kawaii, same character design, soft pastel color palette' 키워드를 포함하고, 주인공 캐릭터의 외모는 항상 동일하게 유지합니다. realistic, photorealistic, 3D render 같은 실사/3D 스타일은 절대 사용하지 않습니다."
                         },
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.7
+                    temperature=0.5
                 )
 
                 result = json.loads(response.choices[0].message.content)
                 image_prompt = result.get("imagePrompt", "")
                 key_elements = result.get("keyElements", [])
+
+                # [2025-11-05 김민중 수정] 필수 키워드 강제 추가
+                required_keywords = ["anime", "consistent", "same character"]
+                missing_keywords = []
+
+                for keyword in required_keywords:
+                    if keyword not in image_prompt.lower():
+                        missing_keywords.append(keyword)
+
+                if missing_keywords:
+                    # 누락된 필수 키워드 추가
+                    additional = ", consistent anime art style, same character design, Studio Ghibli inspired, soft pastel color palette"
+                    image_prompt = image_prompt + additional
+                    logger.info(f"필수 키워드 자동 추가됨: {', '.join(missing_keywords)}")
+
+                # [2025-11-05 김민중 수정] 금지된 스타일 키워드 제거 및 대체
+                forbidden_keywords = ["realistic", "photorealistic", "real photo", "photograph", "3d render", "3d cartoon"]
+                for keyword in forbidden_keywords:
+                    if keyword in image_prompt.lower():
+                        image_prompt = image_prompt.replace(keyword, "anime style")
+                        logger.warning(f"금지된 키워드 '{keyword}' 제거하고 anime style로 대체")
 
                 # 프롬프트 길이 제한
                 if len(image_prompt) > req.maxLength:
@@ -508,15 +542,15 @@ JSON 형식으로 응답해주세요.
                 logger.warning(f"OpenAI 프롬프트 생성 실패, 폴백 사용: {e}")
                 # 폴백: 간단한 변환
 
-        # 폴백: 간단한 키워드 추출 및 기본 프롬프트
-        fallback_prompt = f"Children's book illustration, warm and friendly atmosphere, {req.koreanText[:50]}"
+        # [2025-11-05 김민중 수정] 폴백 프롬프트에 캐릭터 일관성 키워드 추가
+        fallback_prompt = f"A cute child character, consistent anime art style, Studio Ghibli inspired, same character design, kawaii, soft pastel color palette, warm and friendly atmosphere, {req.koreanText[:20]}"
         if len(fallback_prompt) > req.maxLength:
             fallback_prompt = fallback_prompt[:req.maxLength].rsplit(' ', 1)[0]
 
         logger.info(f"폴백 프롬프트 사용: {fallback_prompt}")
         return {
             "imagePrompt": fallback_prompt,
-            "keyElements": ["children's book", "illustration"],
+            "keyElements": ["children's book", "illustration", "anime style", "consistent character"],
             "originalLength": len(req.koreanText),
             "promptLength": len(fallback_prompt)
         }
