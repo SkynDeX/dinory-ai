@@ -12,6 +12,10 @@ logger.setLevel(logging.INFO)
 
 router = APIRouter(tags=["ai"])
 
+# [2025-11-05 추가] 스토리별 캐릭터 설명 저장소 (메모리)
+# Key: storyId, Value: characterDescription
+CHARACTER_DESCRIPTIONS = {}
+
 # ────────────────────────────────────────────────
 try:
     from app.services.story.story_generator import StorySearchService
@@ -113,6 +117,8 @@ class CreateImagePromptRequest(BaseModel):
 
     koreanText: str = Field(validation_alias=AliasChoices('koreanText', 'korean_text'))
     maxLength: Optional[int] = Field(default=150, validation_alias=AliasChoices('maxLength', 'max_length'))
+    characterDescription: Optional[str] = Field(default=None, validation_alias=AliasChoices('characterDescription', 'character_description'))
+    storyId: Optional[str] = Field(default=None, validation_alias=AliasChoices('storyId', 'story_id'))  # [2025-11-05 추가] 캐릭터 설명 자동 조회용
 
 
 # ==================== 폴백 유틸 ====================
@@ -256,7 +262,12 @@ async def generate_next_scene(req: NextSceneRequest):
                     if choice_text:
                         story_context += f"Scene {scene_no}: {choice_text}\n"
 
+                # [2025-11-05 추가] 캐릭터 설명 가져오기
+                character_description = CHARACTER_DESCRIPTIONS.get(req.storyId)
+                logger.info(f"캐릭터 설명 조회: storyId={req.storyId}, found={'Yes' if character_description else 'No'}")
+
                 # [2025-10-28 수정] Story의 title과 description을 OpenAI로 전달
+                # [2025-11-05 수정] character_description 추가
                 # childName은 제거 - 동화 주인공으로 사용하지 않음
                 result = await llm.generate_next_scene_async(
                     story_id=req.storyId,
@@ -266,7 +277,8 @@ async def generate_next_scene(req: NextSceneRequest):
                     interests=req.interests or [],
                     scene_number=req.sceneNumber,
                     previous_choices=req.previousChoices or [],
-                    story_context=story_context if story_context else None
+                    story_context=story_context if story_context else None,
+                    character_description=character_description
                 )
 
                 # Scene 객체로 변환
@@ -294,6 +306,11 @@ async def generate_next_scene(req: NextSceneRequest):
                 #         # 이미지 생성 실패해도 스토리는 계속 진행
 
                 logger.info(f"OpenAI로 다음 장면 생성 완료 scene={scene.sceneNumber}, isEnding={is_ending}")
+
+                # [2025-11-05 추가] 첫 번째 씬일 때 캐릭터 설명 저장
+                if req.sceneNumber == 1 and result.get("characterDescription"):
+                    CHARACTER_DESCRIPTIONS[req.storyId] = result["characterDescription"]
+                    logger.info(f"캐릭터 설명 저장됨: storyId={req.storyId}, characterDescription={result['characterDescription']}")
 
                 # [2025-10-30 김광현] storyTitle이 있으면 응답에 포함
                 response = {"scene": scene.model_dump(), "isEnding": is_ending}
@@ -703,6 +720,8 @@ async def create_image_prompt(req: CreateImagePromptRequest):
     Args:
         koreanText: 한글 동화 내용
         maxLength: 최대 프롬프트 길이 (기본값: 150자)
+        characterDescription: 주인공 캐릭터 설명 (선택)
+        storyId: 스토리 ID (characterDescription 자동 조회용, 선택)
 
     Returns:
         영어 이미지 프롬프트
@@ -714,12 +733,25 @@ async def create_image_prompt(req: CreateImagePromptRequest):
             try:
                 llm = OpenAIService()
 
+                # [2025-11-05 추가] storyId가 있으면 캐릭터 설명 자동 조회
+                character_description = req.characterDescription
+                if not character_description and req.storyId:
+                    character_description = CHARACTER_DESCRIPTIONS.get(req.storyId)
+                    if character_description:
+                        logger.info(f"storyId={req.storyId}로 캐릭터 설명 자동 조회 성공")
+
                 # [2025-11-05 김민중 수정] 일관된 anime style 적용 및 캐릭터 일관성 강화
+                # [2025-11-05 추가] characterDescription이 제공되면 이를 프롬프트에 포함
+                character_info = ""
+                if character_description:
+                    character_info = f"\n**주인공 캐릭터 (필수 포함):** {character_description}"
+
                 prompt = f"""
                 다음 한글 동화 내용을 이미지 생성 AI(PollinationAI)가 이해할 수 있는 짧고 효과적인 영어 프롬프트로 변환해주세요.
 
                 **한글 동화 내용:**
                 {req.koreanText}
+{character_info}
 
 **요구사항:**
 1. 핵심 시각적 요소만 추출 (캐릭터, 배경, 분위기, 행동)
@@ -727,25 +759,26 @@ async def create_image_prompt(req: CreateImagePromptRequest):
 3. **필수 스타일**: 반드시 "consistent anime art style, Studio Ghibli inspired, kawaii" 포함
 4. **캐릭터 일관성 (매우 중요)**:
    - 주인공 캐릭터는 매번 동일하게 묘사: "same character design"
-   - 외모를 구체적으로 고정: "a cute child with [구체적 특징]"
-   - 예: "a cute little child with round face and big eyes" (이 설명을 모든 장면에서 반복)
+   - {"제공된 캐릭터 설명을 반드시 그대로 사용: " + req.characterDescription if req.characterDescription else "외모를 구체적으로 고정: a cute child with [구체적 특징]"}
+   - 캐릭터의 종류(토끼, 사람, 곰 등)와 외모 특징을 매 장면마다 정확히 동일하게 유지
 5. **금지 사항**: realistic, photorealistic, real photo, 3D render 같은 실사/3D 스타일 절대 사용 금지
 6. **색상 일관성**: "soft pastel color palette, consistent color scheme" 반드시 포함
 7. PollinationAI가 이해하기 쉬운 간결한 문장
 
 **좋은 예시:**
-- "A cute child with round face walking through a magical forest, consistent anime art style, Studio Ghibli inspired, kawaii, soft pastel colors"
-- "A cute child with round face helping a small bird, same character design, anime style, gentle atmosphere, consistent color scheme"
+- "A cute white rabbit with pink ears walking through a magical forest, consistent anime art style, Studio Ghibli inspired, kawaii, soft pastel colors, same character design"
+- "The same white rabbit with pink ears helping a small bird, same character design, anime style, gentle atmosphere, consistent color scheme"
 
 **나쁜 예시 (사용 금지):**
 - "realistic portrait" ❌
 - "photorealistic rendering" ❌
 - "3D cartoon style" ❌
 - "different character design" ❌
+- 캐릭터 종류가 바뀌는 경우 (토끼 → 사람) ❌
 
 **출력 형식 (JSON):**
 {{
-    "imagePrompt": "영어 프롬프트 (최대 {req.maxLength}자, 반드시 consistent anime art style 포함)",
+    "imagePrompt": "영어 프롬프트 (최대 {req.maxLength}자, 반드시 consistent anime art style과 동일한 캐릭터 설명 포함)",
     "keyElements": ["주요 요소1", "주요 요소2", "주요 요소3"]
 }}
 
@@ -753,12 +786,16 @@ async def create_image_prompt(req: CreateImagePromptRequest):
                 """
 
                 # [2025-11-05 김민중 수정] 시스템 프롬프트에 캐릭터 일관성 강조
+                system_prompt = "당신은 Studio Ghibli 스타일 애니메이션 이미지 프롬프트 작성 전문가입니다. 한글 텍스트에서 핵심 시각적 요소를 추출하여 짧고 효과적인 영어 프롬프트를 만듭니다. 반드시 'consistent anime art style, Studio Ghibli inspired, kawaii, same character design, soft pastel color palette' 키워드를 포함하고, 주인공 캐릭터의 외모는 항상 동일하게 유지합니다. realistic, photorealistic, 3D render 같은 실사/3D 스타일은 절대 사용하지 않습니다."
+                if req.characterDescription:
+                    system_prompt += f" 주인공 캐릭터는 반드시 '{req.characterDescription}' 로 고정하여 모든 장면에서 동일하게 유지해야 합니다. 캐릭터의 종류와 외모 특징을 절대 바꾸지 마세요."
+
                 response = llm.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
-                            "content": "당신은 Studio Ghibli 스타일 애니메이션 이미지 프롬프트 작성 전문가입니다. 한글 텍스트에서 핵심 시각적 요소를 추출하여 짧고 효과적인 영어 프롬프트를 만듭니다. 반드시 'consistent anime art style, Studio Ghibli inspired, kawaii, same character design, soft pastel color palette' 키워드를 포함하고, 주인공 캐릭터의 외모는 항상 동일하게 유지합니다. realistic, photorealistic, 3D render 같은 실사/3D 스타일은 절대 사용하지 않습니다."
+                            "content": system_prompt
                         },
                         {"role": "user", "content": prompt}
                     ],
@@ -809,7 +846,13 @@ async def create_image_prompt(req: CreateImagePromptRequest):
                 # 폴백: 간단한 변환
 
         # [2025-11-05 김민중 수정] 폴백 프롬프트에 캐릭터 일관성 키워드 추가
-        fallback_prompt = f"A cute child character, consistent anime art style, Studio Ghibli inspired, same character design, kawaii, soft pastel color palette, warm and friendly atmosphere, {req.koreanText[:20]}"
+        # [2025-11-05 추가] storyId로 캐릭터 설명 조회 또는 제공된 characterDescription 사용
+        character_description = req.characterDescription
+        if not character_description and req.storyId:
+            character_description = CHARACTER_DESCRIPTIONS.get(req.storyId)
+
+        character_part = character_description if character_description else "A cute child character"
+        fallback_prompt = f"{character_part}, consistent anime art style, Studio Ghibli inspired, same character design, kawaii, soft pastel color palette, warm and friendly atmosphere, {req.koreanText[:20]}"
         if len(fallback_prompt) > req.maxLength:
             fallback_prompt = fallback_prompt[:req.maxLength].rsplit(' ', 1)[0]
 

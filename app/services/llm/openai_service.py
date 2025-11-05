@@ -253,7 +253,8 @@ class OpenAIService:
             interests: List[str],
             scene_number: int,
             previous_choices: List[Dict],
-            story_context: Optional[str] = None
+            story_context: Optional[str] = None,
+            character_description: Optional[str] = None  # [2025-11-05 추가] 캐릭터 일관성
     ) -> Dict:
         """
         이전 선택을 기반으로 다음 씬 생성 (분기형 스토리)
@@ -278,7 +279,7 @@ class OpenAIService:
         try:
             # 프롬프트 생성
             prompt = self._create_next_scene_prompt(
-                story_title, story_description, emotion, interests, scene_number, previous_choices, story_context
+                story_title, story_description, emotion, interests, scene_number, previous_choices, story_context, character_description
             )
 
             logger.info(f'씬 {scene_number} 생성 중... (스토리: {story_title}, 이전 선택: {len(previous_choices)}개)')
@@ -315,12 +316,12 @@ class OpenAIService:
             if not scene or not scene.get('sceneNumber'):
                 scene = result
 
-            # 씬 1인 경우 storyTitle 추출하여 응답에 포함
+            # 씬 1인 경우 storyTitle과 characterDescription 추출하여 응답에 포함
             response = {"scene": scene, "isEnding": scene.get("isEnding", scene_number >= 8)}
-            logger.info(f'scene_number={scene_number}, result에 storyTitle 있는지: {result.get("storyTitle")}') 
+            logger.info(f'scene_number={scene_number}, result에 storyTitle 있는지: {result.get("storyTitle")}')
 
             logger.info(f'scene_number={scene_number}, result keys={list(result.keys())}')
-            logger.info(f'result에 storyTitle 있는지: {result.get("storyTitle")}') 
+            logger.info(f'result에 storyTitle 있는지: {result.get("storyTitle")}')
 
             if scene_number == 1:
                 if result.get('storyTitle'):
@@ -328,6 +329,14 @@ class OpenAIService:
                     logger.info(f'동화 제목 생성됨: {response["storyTitle"]}')
                 else:
                     logger.warning(f'scene=1인데 storyTitle이 없음! result keys={list(result.keys())}')
+
+                # [2025-11-05 추가] 캐릭터 설명 추출
+                if result.get('characterDescription'):
+                    response['characterDescription'] = result.get('characterDescription')
+                    logger.info(f'캐릭터 설명 생성됨: {response["characterDescription"]}')
+                elif scene.get('characterDescription'):
+                    response['characterDescription'] = scene.get('characterDescription')
+                    logger.info(f'캐릭터 설명 생성됨 (scene에서): {response["characterDescription"]}')
 
             logger.info(f'씬 {scene_number} 생성 완료: content={len(scene.get("content", ""))}자, choices={len(scene.get("choices", []))}개')
             return response
@@ -344,7 +353,8 @@ class OpenAIService:
             interests: List[str],
             scene_number: int,
             previous_choices: List[Dict],
-            story_context: Optional[str]
+            story_context: Optional[str],
+            character_description: Optional[str] = None  # [2025-11-05 추가]
     ) -> str:
         """[2025-10-28 수정] 다음 씬 생성 프롬프트 작성
 
@@ -409,6 +419,24 @@ class OpenAIService:
                         - 아이가 배운 교훈을 자연스럽게 담으세요.
                         """
 
+        # [2025-11-05 추가] 캐릭터 일관성 지시사항
+        character_note = ""
+        if scene_number == 1:
+            character_note = """
+            **[매우 중요] 캐릭터 일관성:**
+            - 씬 1에서는 주인공 캐릭터를 정의해야 합니다!
+            - characterDescription을 반드시 생성하세요. 예: "a cute white rabbit with pink ears", "a brave little bear with brown fur"
+            - 영어로 작성하고, 구체적인 외모 특징을 포함하세요 (종류, 색상, 특징)
+            - 이 설명은 모든 씬의 이미지 생성에 사용됩니다
+            """
+        elif character_description:
+            character_note = f"""
+            **[매우 중요] 캐릭터 일관성:**
+            - 주인공 캐릭터: {character_description}
+            - 모든 씬에서 이 캐릭터를 정확히 유지하세요
+            - 캐릭터의 종류나 외모를 절대 바꾸지 마세요
+            """
+
         prompt = f"""
             '{story_title}' 동화의 씬 {scene_number}을 생성해주세요.
 
@@ -418,6 +446,8 @@ class OpenAIService:
             - 주제/감정: {emotion}
             - 관심 요소: {interests_text}
 
+            {character_note}
+
             {stage_guide}
 
             {choices_summary}
@@ -426,7 +456,7 @@ class OpenAIService:
             {story_context or "첫 번째 씬입니다."}
 
            **요구사항:**
-            1. {f'**[중요]** 씬 1에서는 반드시 storyTitle을 생성해야 합니다! 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요.' if scene_number == 1 else '**[중요]** 이전 씬의 선택 결과가 이번 씬 내용에 명확하게 드러나야 합니다! 아이가 선택한 행동의 결과를 구체적으로 보여주세요.'}
+            1. {f'**[중요]** 씬 1에서는 반드시 storyTitle과 characterDescription을 생성해야 합니다! storyTitle은 한글로 작성하세요. 예: "용감한 꼬마 호랑이", "마법의 숲 탐험", "친구를 도운 작은 별" 등. 원본 제목 "{story_title}"을 참고하되 더 매력적이고 아이가 이해하기 쉬운 제목으로 만드세요. characterDescription은 영어로 주인공의 외모를 구체적으로 작성하세요.' if scene_number == 1 else '**[중요]** 이전 씬의 선택 결과가 이번 씬 내용에 명확하게 드러나야 합니다! 아이가 선택한 행동의 결과를 구체적으로 보여주세요.'}
             2. {emotion} 감정을 다루는 따뜻한 이야기
             3. {interests_text} 요소를 포함
             4. **스토리 연결성**: 아이의 선택이 스토리를 바꿨다는 느낌을 주도록 작성
@@ -449,6 +479,7 @@ class OpenAIService:
             prompt += f"""
             {{
                 "storyTitle": "동화 제목 (한글로 필수! 예: 용감한 꼬마 호랑이, 친구를 도운 작은 별 등)",
+                "characterDescription": "주인공 캐릭터 설명 (영어로 필수! 예: a cute white rabbit with pink ears, a brave little bear with brown fur)",
                 "scene": {{
                     "sceneNumber": 1,
                     "content": "씬 내용 (3-5문장, '{story_title}'에 맞는 내용)",
@@ -642,17 +673,19 @@ class OpenAIService:
             interests: List[str],
             scene_number: int,
             previous_choices: List[Dict],
-            story_context: Optional[str] = None
+            story_context: Optional[str] = None,
+            character_description: Optional[str] = None  # [2025-11-05 추가]
     ) -> Dict:
         """
         이전 선택을 기반으로 다음 씬 생성 (분기형 스토리) - async 버전
 
         [2025-10-28 수정] story_title, story_description 추가
+        [2025-11-05 수정] character_description 추가
         childName 제거 - 동화 주인공으로 사용하지 않음
         """
         return self.generate_next_scene(
             story_id, story_title, story_description, emotion, interests,
-            scene_number, previous_choices, story_context
+            scene_number, previous_choices, story_context, character_description
         )
 
     async def generate_image_async(self, prompt: str, size: str = "1024x1024") -> str:
