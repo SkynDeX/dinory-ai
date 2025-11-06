@@ -905,74 +905,100 @@ async def analyze_chat_pattern(request: Dict[str, Any]):
 
 @router.post("/extract-chat-topics")
 async def extract_chat_topics(request: Dict[str, Any]):
-    """채팅 메시지에서 주요 관심 주제 추출"""
+    """
+    대화 메세지에서 주요 주제 키워드 추출 + 심리 분석
+    """
     logger.info("대화 주제 추출 요청")
-    try:
-        messages = request.get("messages", [])
 
-        if not OpenAIService or not messages:
-            logger.warning("OpenAIService 없거나 메시지 없음")
-            return {"topics": []}
+    messages = request.get("messages", [])
+
+    if not messages:
+        logger.warning("메세지 없음")
+        return {"topics": [], "psychologicalAnalysis": ""}
+    
+    # 대화 내용 결합
+    conversation_text = "\n".join([
+        f"{msg.get('sender', 'unknown')}: {msg.get('message', '')}"
+        for msg in messages
+    ])
+
+    try:
 
         llm = OpenAIService()
 
-        # 아이의 메시지만 추출
-        child_messages = [msg.get("message", "") for msg in messages if msg.get("sender") in ["USER", "CHILD"]]
+        # 1. 주제 키워드 추출
+        topic_prompt = f"""
+다음은 아이와 챗봇의 대화 내용입니다:
 
-        if not child_messages:
-            return {"topics": []}
+{conversation_text}
 
-        # 대화 샘플 (최근 30개)
-        sample_messages = "\n".join([f"- {msg}" for msg in child_messages[-30:]])
+위 대화에서 아이가 주로 관심을 보인 주제 키워드를 추출하세요.
 
-        prompt = f"""
-다음은 아이와의 대화 내용입니다. 대화에서 아이가 관심있어 하는 주제나 키워드를 추출해주세요.
-
-**대화 내용**:
-{sample_messages}
-
-아이가 자주 언급하거나 관심있어 하는 주제를 최대 10개까지 추출해주세요.
-
-다음 JSON 형식으로만 응답하세요:
+다음 JSON 형식으로만 응답해주세요 (다른 설명 없이 오직 JSON만):
 {{
   "topics": [
-    {{"text": "주제1", "count": 빈도}},
-    {{"text": "주제2", "count": 빈도}},
-    ...
+    {{"text": "키워드1", "count": 빈도수}},
+    {{"text": "키워드2", "count": 빈도수}},
+    {{"text": "키워드3", "count": 빈도수}}
   ]
 }}
 
-**조건**:
-1. 구체적인 명사형 키워드로 추출 (예: "동물", "공룡", "우주", "친구", "학교" 등)
-2. 너무 추상적인 단어는 제외 (예: "것", "이야기" 등)
-3. 대화에서 실제로 언급된 주제만 포함
-4. count는 대략적인 빈도 (1~10)
-5. 빈도가 높은 순서로 정렬
-6. 최대 10개
+조건:
+- 5-10개의 키워드
+- 각 키워드의 등장 빈도수 포함 (1-10 사이의 숫자)
+- 아이가 실제로 언급한 주제만 포함
 """
 
-        try:
-            response = llm.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.7
-            )
+        topic_response = llm.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": topic_prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+            max_tokens=500
+        )
+        topics_text = topic_response.choices[0].message.content.strip()
+        logger.info(f"Topics 원본 응답: {topics_text}")
 
-            result = json.loads(response.choices[0].message.content)
-            topics = result.get("topics", [])
+        topic_data = json.loads(topics_text)
+        topics = topic_data.get("topics", [])
 
-            logger.info(f"대화 주제 추출 완료: {len(topics)}개")
-            return {"topics": topics}
+        # 2. 심리 분석
+        psych_prompt = f"""
+다음은 아이와 챗봇의 대화 내용입니다:
 
-        except Exception as e:
-            logger.error(f"AI 주제 추출 실패: {e}")
-            return {"topics": []}
+{conversation_text}
 
+위 대화를 바탕으로 아이의 심리 상태와 관심사를 간단히 분석해주세요.
+
+분석 포인트:
+- 아이가 주로 관심을 보이는 주제
+- 대화에서 드러나는 감정 상태
+- 긍정적인 측면과 부정적인 측면 반드시 포함
+- 부모가 주목해야 할 점 (있다면)
+
+3~4문장으로 부모님께 전달할 따뜻한 톤으로 객관적으로 작성해주세요.
+"""
+        psych_response = llm.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": psych_prompt}],
+            temperature=0.7,
+            max_tokens=300
+        )
+        psychological_analysis = psych_response.choices[0].message.content.strip()
+
+        return {
+            "topics": topics,
+            "psychologicalAnalysis": psychological_analysis
+        }
+    
     except Exception as e:
-        logger.exception("extract-chat-topics 실패")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"주제 추출 및 심리 분석 실패: {e}")
+        return {
+            "topics": [],
+            "psychologicalAnalysis": "분석 중 오류가 발생했습니다."
+        }
+        
+    
 
 @router.post("/generate-dashboard-insights")
 async def generate_dashboard_insights(request: Dict[str, Any]):
@@ -1003,6 +1029,8 @@ async def generate_dashboard_insights(request: Dict[str, Any]):
         low_ability = min(abilities.items(), key=lambda x: x[1]) if abilities else None
         top_choice = choices[0] if choices else None
 
+        logger.info(f"📊 Quick 인사이트 입력 데이터: top_ability={top_ability}, top_choice={top_choice}")
+
         period_text = {"day": "오늘", "week": "이번 주", "month": "이번 달"}.get(period, "이번 주")
 
         quick_prompt = f"""
@@ -1010,7 +1038,7 @@ async def generate_dashboard_insights(request: Dict[str, Any]):
 - 완료한 동화: {total_stories}개
 - 가장 높은 능력: {top_ability[0]} ({top_ability[1]:.0f}점) (최고인 능력)
 - 가장 낮은 능력: {low_ability[0]} ({low_ability[1]:.0f}점) (개선이 필요한 능력)
-- 주요 선택 스타일: {top_choice['name']} ({top_choice['value']}%)
+- **주요 선택 스타일: {top_choice['name']} ({top_choice['value']}%)**
 
 부모에게 전달할 따뜻하고 격려하는 한 줄 인사이트를 작성해주세요.
 
@@ -1018,7 +1046,12 @@ async def generate_dashboard_insights(request: Dict[str, Any]):
 1. 40자 이내
 2. 아이의 강점을 칭찬하고, 개선점을 부드럽게 제안
 3. 구체적인 능력명과 수치 언급
-4. "~해요", "~보세요" 등 친근한 어조
+4. **반드시 주요 선택 스타일 "{top_choice['name']}"을 언급해야 합니다**
+5. "~해요", "~보세요" 등 친근한 어조
+
+예시:
+- "용기가 높고 용감한 선택을 주로 하고 있어요!"
+- "배려하는 선택이 많고 공감 능력이 뛰어나요!"
 
 JSON 형식으로만 응답:
 {{
@@ -1035,6 +1068,7 @@ JSON 형식으로만 응답:
             )
             quick_data = json.loads(quick_response.choices[0].message.content)
             quick_insight = quick_data.get("insight", "아이와 함께 동화를 읽으며 성장해보세요!")
+            logger.info(f"✅ Quick 인사이트 생성 완료: {quick_insight}")
         except Exception as e:
             logger.error(f"Quick 인사이트 생성 실패: {e}")
             quick_insight = f"{top_ability[0] if top_ability else '능력'}이 높고, {top_choice['name'] if top_choice else '좋은 선택'}을 주로 하고 있어요."
