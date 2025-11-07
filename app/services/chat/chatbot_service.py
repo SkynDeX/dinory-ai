@@ -41,9 +41,10 @@ class ChatbotService:
         print(f"message: {message}")
         print(f"현재 story_context 키들: {list(self.story_context.keys())}")
 
-        # 세션 히스토리 가져오기 또는 초기화
+        # [2025-11-07 추가] 세션 히스토리 복원 (서버 재시작 대응)
         if session_id not in self.conversation_history:
-            self.conversation_history[session_id] = []
+            print(f"🔄 세션 {session_id}의 히스토리가 비어있음 - 과거 대화 복원 시도")
+            await self._restore_conversation_history(session_id)
 
         # 사용자 메시지 추가
         self.conversation_history[session_id].append({
@@ -159,7 +160,12 @@ class ChatbotService:
         print(f"story_title: {story_title}")
         print(f"abilities: {abilities}")
 
-        # 세션 히스토리 초기화
+        # [2025-11-07 추가] 세션 히스토리 복원 (서버 재시작 대응)
+        if session_id not in self.conversation_history:
+            print(f"🔄 동화 세션 {session_id}의 히스토리가 비어있음 - 과거 대화 복원 시도")
+            await self._restore_conversation_history(session_id)
+
+        # 히스토리가 여전히 비어있으면 초기화
         if session_id not in self.conversation_history:
             self.conversation_history[session_id] = []
 
@@ -392,6 +398,57 @@ class ChatbotService:
                 "choices": ["더 알려줘", "다른 이야기"],
                 "emotion": "neutral"
             }
+
+    async def _restore_conversation_history(self, session_id: int):
+        """
+        [2025-11-07 추가] 서버 재시작 시 세션의 과거 대화 복원
+        - Spring Boot API에서 세션의 메시지 조회
+        - conversation_history[session_id]에 채우기
+        - 최근 10개 대화만 복원 (너무 많으면 토큰 초과)
+        """
+        try:
+            print(f"📥 세션 {session_id}의 과거 대화 복원 시작...")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.spring_api_url}/chat/{session_id}"
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                messages = data.get("messages", [])
+
+                if not messages:
+                    print(f"ℹ️ 세션 {session_id}에 과거 대화 없음")
+                    self.conversation_history[session_id] = []
+                    return
+
+                # 최근 10개 대화만 복원 (20개 메시지 = 10번 왕복)
+                recent_messages = messages[-20:] if len(messages) > 20 else messages
+
+                # OpenAI 형식으로 변환
+                restored_history = []
+                for msg in recent_messages:
+                    sender = msg.get("sender", "")
+                    content = msg.get("message", "")
+
+                    if sender == "USER":
+                        restored_history.append({
+                            "role": "user",
+                            "content": content
+                        })
+                    elif sender == "AI":
+                        restored_history.append({
+                            "role": "assistant",
+                            "content": content
+                        })
+
+                self.conversation_history[session_id] = restored_history
+                print(f"✅ 세션 {session_id}의 과거 대화 {len(restored_history)}개 복원 완료")
+
+        except Exception as e:
+            print(f"⚠️ 세션 {session_id} 복원 실패: {e}")
+            # 실패해도 빈 배열로 초기화
+            self.conversation_history[session_id] = []
 
     async def _load_story_context_from_backend(self, session_id: int) -> Optional[Dict[str, Any]]:
         """

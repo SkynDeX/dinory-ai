@@ -42,6 +42,25 @@ class ChatbotServiceWithRAG:
 5. 아이가 궁금해하는 것에 대해 적극적으로 답변하세요
 6. 안전하고 건전한 대화를 유지하세요
 7. 짧고 간결하게 대화하세요 (1-3문장)
+
+**[2025-11-07 추가] 디노의 감정 상태에 따른 말투 변화:**
+- 현재 디노의 감정 상태는 대화 맥락에 따라 자동으로 결정됩니다.
+- 감정별 말투 가이드:
+  * happy (행복): 밝고 신나는 말투, 이모지 많이 사용 (😊💙✨🎉)
+    예: "와! 정말 멋진데? 너무 기대된다! ✨"
+  * sad (슬픔): 조용하고 차분한 말투, 위로하는 느낌
+    예: "그랬구나... 많이 속상했겠다. 괜찮아."
+  * angry (화남): **퉁명스럽고 짜증난 말투, 짧게 대답, 약간 싸가지 없는 느낌**
+    **중요: 이모지 사용 금지, 문장 짧게, 반말 강하게, 귀찮은 티 내기**
+    예시:
+    - "그래. 알았어." (짧게 끊기)
+    - "하... 진짜 짜증나네." (한숨 + 공감)
+    - "뭐. 그럴 수도 있지." (무관심)
+    - "별로 얘기하고 싶지 않은데." (솔직하게)
+    - "됐어. 알겠다고." (약간 툭툭)
+    - "그런가. 잘 모르겠는데." (무뚝뚝)
+  * neutral (평범): 평소의 친근한 말투
+    예: "그렇구나! 더 궁금한 거 있어?"
 """
         # 세션별 대화 히스토리 저장 (현재 세션 내 메모리)
         self.conversation_history = {}
@@ -68,9 +87,10 @@ class ChatbotServiceWithRAG:
         print(f"session_id: {session_id}, child_id: {child_id}")
         print(f"message: {message}")
 
-        # 세션 히스토리 가져오기 또는 초기화
+        # [2025-11-07 추가] 세션 히스토리 복원 (서버 재시작 대응)
         if session_id not in self.conversation_history:
-            self.conversation_history[session_id] = []
+            print(f"🔄 세션 {session_id}의 히스토리가 비어있음 - 과거 대화 복원 시도")
+            await self._restore_conversation_history(session_id)
 
         # 사용자 메시지 추가
         self.conversation_history[session_id].append({
@@ -80,11 +100,19 @@ class ChatbotServiceWithRAG:
 
         # OpenAI API 호출
         try:
-            # 시스템 프롬프트 생성 (기본 또는 동화 컨텍스트)
+            # [2025-11-07 추가] 현재 대화 맥락으로 디노의 감정 상태 판단
+            dino_emotion = await self._analyze_dino_emotion(
+                session_id,
+                message
+            )
+            print(f"🎭 디노 감정 상태: {dino_emotion}")
+
+            # 시스템 프롬프트 생성 (기본 또는 동화 컨텍스트 + 감정 상태)
             system_prompt = await self._build_system_prompt(
                 session_id,
                 message,
-                child_id
+                child_id,
+                dino_emotion  # 감정 상태 전달
             )
 
             messages = [
@@ -112,6 +140,57 @@ class ChatbotServiceWithRAG:
         except Exception as e:
             print(f"Error generating response: {e}")
             return "죄송해요, 잠시 후에 다시 이야기해요!"
+
+    async def _restore_conversation_history(self, session_id: int):
+        """
+        [2025-11-07 추가] 서버 재시작 시 세션의 과거 대화 복원
+        - Spring Boot API에서 세션의 메시지 조회
+        - conversation_history[session_id]에 채우기
+        - 최근 10개 대화만 복원 (너무 많으면 토큰 초과)
+        """
+        try:
+            print(f"📥 세션 {session_id}의 과거 대화 복원 시작...")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.spring_api_url}/chat/{session_id}"
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                messages = data.get("messages", [])
+
+                if not messages:
+                    print(f"ℹ️ 세션 {session_id}에 과거 대화 없음")
+                    self.conversation_history[session_id] = []
+                    return
+
+                # 최근 10개 대화만 복원 (20개 메시지 = 10번 왕복)
+                recent_messages = messages[-20:] if len(messages) > 20 else messages
+
+                # OpenAI 형식으로 변환
+                restored_history = []
+                for msg in recent_messages:
+                    sender = msg.get("sender", "")
+                    content = msg.get("message", "")
+
+                    if sender == "USER":
+                        restored_history.append({
+                            "role": "user",
+                            "content": content
+                        })
+                    elif sender == "AI":
+                        restored_history.append({
+                            "role": "assistant",
+                            "content": content
+                        })
+
+                self.conversation_history[session_id] = restored_history
+                print(f"✅ 세션 {session_id}의 과거 대화 {len(restored_history)}개 복원 완료")
+
+        except Exception as e:
+            print(f"⚠️ 세션 {session_id} 복원 실패: {e}")
+            # 실패해도 빈 배열로 초기화
+            self.conversation_history[session_id] = []
 
     async def _load_story_context_from_backend(self, session_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -160,16 +239,100 @@ class ChatbotServiceWithRAG:
             print(f"❌ [LoadStoryContext] 로드 실패: {e}")
             return None
 
+    async def _analyze_dino_emotion(
+        self,
+        session_id: int,
+        current_message: str
+    ) -> str:
+        """
+        [2025-11-07 추가] 대화 맥락을 기반으로 디노의 감정 상태 판단
+        - 아이의 메시지와 최근 대화를 분석하여 디노가 어떤 감정으로 반응해야 할지 결정
+        """
+        try:
+            # 최근 대화 3개 가져오기
+            recent_history = self.conversation_history.get(session_id, [])[-3:]
+
+            context = "\n".join([
+                f"{'아이' if msg['role'] == 'user' else '디노'}: {msg['content']}"
+                for msg in recent_history
+            ])
+
+            prompt = f"""
+아래 대화 맥락을 보고 디노(AI 친구)가 어떤 감정으로 반응해야 할지 판단하세요.
+
+대화 맥락:
+{context}
+아이의 최신 메시지: {current_message}
+
+디노의 감정 상태를 다음 중 하나로 선택하세요:
+- happy: 아이가 긍정적이거나 기쁜 이야기를 할 때, 칭찬할 만한 일을 했을 때
+- sad: 아이가 슬프거나 실망한 이야기를 할 때, 위로가 필요할 때
+- angry: 아이가 화가 나거나 짜증나거나 불만을 표현할 때,
+  **디노도 같이 짜증내고 퉁명스럽게 공감해야 함**
+  예: "엄마가 게임 못하게 해", "숙제 너무 많아", "친구가 욕했어", "짜증나"
+  → 이런 상황에선 디노도 퉁명스럽게 짜증내며 공감
+- neutral: 일상적인 대화, 질문, 평범한 주제일 때
+
+JSON 형식으로만 응답하세요:
+{{"emotion": "감정"}}
+"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "당신은 대화 맥락을 분석하여 감정을 판단하는 AI입니다. JSON으로만 응답하세요."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=50,
+                response_format={"type": "json_object"}
+            )
+
+            import json
+            result = json.loads(response.choices[0].message.content)
+            emotion = result.get("emotion", "neutral")
+
+            # 유효성 검증
+            if emotion not in ["happy", "sad", "angry", "neutral"]:
+                emotion = "neutral"
+
+            return emotion
+
+        except Exception as e:
+            print(f"❌ 감정 분석 실패: {e}")
+            return "neutral"
+
     async def _build_system_prompt(
         self,
         session_id: int,
         current_message: str,
-        child_id: Optional[int]
+        child_id: Optional[int],
+        dino_emotion: str = "neutral"  # [2025-11-07 추가]
     ) -> str:
         """
         RAG 메모리를 활용하여 컨텍스트가 풍부한 시스템 프롬프트 생성
         """
         base_prompt = self.system_prompt
+
+        # [2025-11-07 추가] 현재 감정 상태 명시
+        if dino_emotion == "angry":
+            emotion_instruction = f"""
+
+**🔥 현재 디노의 감정 상태: {dino_emotion} (화남/짜증) 🔥**
+**필수 사항:**
+1. 이모지 절대 사용 금지
+2. 문장은 1개만, 최대한 짧게 (5-10자)
+3. "하...", "됐어", "그래", "알았어" 같은 퉁명스러운 표현 사용
+4. 친절하게 말하지 말고 짜증난 티 내기
+5. 질문 최소화 (귀찮은 티)
+위에서 설명한 'angry' 말투를 **반드시** 사용하세요. 너무 친절하면 안 됩니다!
+"""
+        else:
+            emotion_instruction = f"""
+
+**현재 디노의 감정 상태: {dino_emotion}**
+위에서 설명한 '{dino_emotion}' 감정에 맞는 말투로 대화하세요.
+"""
 
         # 1. 동화 컨텍스트 (현재 세션에 동화 정보가 있으면)
         story_context_text = ""
@@ -265,6 +428,7 @@ class ChatbotServiceWithRAG:
         # 3. 통합 프롬프트 생성
         enhanced_prompt = f"""
 {base_prompt}
+{emotion_instruction}
 
 {story_context_text}
 
@@ -274,8 +438,10 @@ class ChatbotServiceWithRAG:
 1. 반말로 친근하게 대화하세요 (예: "~야", "~니?", "~어")
 2. 아이의 감정을 이해하고 격려해주세요
 3. 짧고 간결하게 1-2문장으로 대화하세요
-4. 이모지를 적절히 사용하세요 (😊, 💙, ✨)
-5. 아이의 생각과 감정을 더 이끌어내는 질문을 하세요
+4. 이모지 사용: happy일 때만 많이, angry일 때는 절대 금지
+5. 아이의 생각과 감정을 더 이끌어내는 질문을 하세요 (단, angry일 때는 질문 최소화)
+6. **🚨 현재 감정 상태({dino_emotion})에 맞는 말투를 반드시 사용하세요! 🚨**
+   - angry일 때: 짧게, 퉁명스럽게, 짜증난 티 내기 (친절 금지)
 """.strip()
 
         # 디버그: 프롬프트 길이 확인
@@ -303,7 +469,12 @@ class ChatbotServiceWithRAG:
         """
         print(f"\n=== generate_first_message_from_story ===")
 
-        # 세션 히스토리 초기화
+        # [2025-11-07 추가] 세션 히스토리 복원 (서버 재시작 대응)
+        if session_id not in self.conversation_history:
+            print(f"🔄 동화 세션 {session_id}의 히스토리가 비어있음 - 과거 대화 복원 시도")
+            await self._restore_conversation_history(session_id)
+
+        # 히스토리가 여전히 비어있으면 초기화
         if session_id not in self.conversation_history:
             self.conversation_history[session_id] = []
 
