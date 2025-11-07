@@ -270,8 +270,15 @@ class MemoryService:
         if story_completions:
             summary_parts.append("**완료한 동화:**")
             for story in story_completions[:3]:  # 최근 3개만
-                title = story.get('story_title', '알 수 없음')
-                abilities = story.get('abilities', {})
+                title = story.get('storyTitle', '알 수 없음')  # camelCase로 변경!
+                # 능력치 정보 추출 (Java DTO의 total* 필드들)
+                abilities = {
+                    'courage': story.get('totalCourage', 0),
+                    'empathy': story.get('totalEmpathy', 0),
+                    'creativity': story.get('totalCreativity', 0),
+                    'responsibility': story.get('totalResponsibility', 0),
+                    'friendship': story.get('totalFriendship', 0)
+                }
                 ability_text = self._format_abilities(abilities)
                 summary_parts.append(f"  - '{title}' ({ability_text})")
 

@@ -395,6 +395,9 @@ JSON 형식으로만 응답하세요:
 - 아이 이름을 기억하고 대화할 때 이름을 사용하세요 (예: "{story_info.get('child_name', '친구')}야", "{story_info.get('child_name', '친구')} 생각은 어때?")
 - 아이가 "내 이름이 뭐야?", "나 누구야?" 등을 물어보면 위에 있는 아이 이름을 정확히 알려주세요
 - 아이가 "능력치", "능력", "스탯", "얻은 것" 등을 물어보면 위 능력치 정보를 정확히 알려주세요
+- 아이가 "마지막에 무슨 선택했어?", "마지막 선택" 등을 물어보면:
+  * 위에 나와있는 "아이가 선택한 내용"에서 **가장 마지막 장면 번호의 선택**을 알려주세요
+  * 예: "5번째 장면에서 '친구와 함께 별을 그려보기'를 선택했어! (창의성 +5)"
 - 아이가 "몇 번째 장면에서 무슨 선택했어?", "X번째 장면 선택지" 등을 물어보면:
   * 위에 나와있는 "아이가 선택한 내용"에서 해당 장면 번호의 선택을 **정확히 그대로** 알려주세요
   * 선택지 텍스트와 획득한 능력을 함께 알려주세요
@@ -402,17 +405,27 @@ JSON 형식으로만 응답하세요:
   * 위에 나와있는 해당 장면의 content를 **정확히 그대로** 알려주세요
   * 요약하지 말고 원문 그대로 전달하세요
   * "자세히 보려고 노력하는 장면" 같은 추상적인 설명 대신, 실제 content를 그대로 읽어주세요
+- 아이가 "이 동화", "이번 동화", "방금 읽은 동화" 등을 물어보면:
+  * 위에 나와있는 **'{story_info["story_title"]}'** 동화를 말하는 것입니다
+  * 다른 동화 내용과 섞지 말고, 이 동화의 정보만 사용하세요
 - 동화 내용과 연관지어 대화하세요
 """
 
         # 2. RAG 메모리 (과거 대화 및 동화 기록)
         memory_context_text = ""
         if self.use_memory and child_id:
+            print(f"★ [BuildPrompt] RAG 메모리 검색 시작: child_id={child_id}")
             memory_context = await self.memory_service.get_relevant_context(
                 current_message=current_message,
                 child_id=child_id,
                 session_id=session_id
             )
+
+            print(f"★ [BuildPrompt] 메모리 조회 결과:")
+            print(f"   - story_completions: {len(memory_context.get('story_completions', []))}개")
+            print(f"   - summary 길이: {len(memory_context.get('summary', ''))} 문자")
+            if memory_context.get("story_completions"):
+                print(f"   - 첫 번째 동화: {memory_context['story_completions'][0].get('storyTitle', 'N/A')}")
 
             if memory_context["summary"]:
                 memory_context_text = f"""
@@ -424,6 +437,11 @@ JSON 형식으로만 응답하세요:
 - "지난번에 뭐 읽었어?", "전에 무슨 얘기했지?" 같은 질문에 답변하세요
 - 자연스럽게 과거 경험을 언급하며 대화를 이어가세요
 """
+                print(f"★ [BuildPrompt] ✅ 메모리 컨텍스트 프롬프트에 포함")
+            else:
+                print(f"★ [BuildPrompt] ⚠️ summary가 비어있음 - 메모리 컨텍스트 미포함")
+        else:
+            print(f"★ [BuildPrompt] ⚠️ RAG 메모리 비활성화 (use_memory={self.use_memory}, child_id={child_id})")
 
         # 3. 통합 프롬프트 생성
         enhanced_prompt = f"""
@@ -450,6 +468,11 @@ JSON 형식으로만 응답하세요:
             print(f"★ [BuildPrompt] ✅ 프롬프트에 '동화 장면별 내용' 포함됨")
         else:
             print(f"★ [BuildPrompt] ❌ 프롬프트에 '동화 장면별 내용' 없음!")
+
+        if "아이의 기억 (과거 기록)" in enhanced_prompt:
+            print(f"★ [BuildPrompt] ✅ 프롬프트에 'RAG 메모리' 포함됨")
+        else:
+            print(f"★ [BuildPrompt] ❌ 프롬프트에 'RAG 메모리' 없음!")
 
         return enhanced_prompt
 
