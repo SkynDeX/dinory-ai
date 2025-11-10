@@ -55,11 +55,25 @@ async def generate_growth_evaluation(req: GrowthReportRequest):
 
             changes_text = ", ".join(changes) if changes else "전반적으로 안정적"
 
-            # 강점 영역
-            strengths_text = ", ".join([s.get("area", "") for s in req.strengths[:2]]) if req.strengths else "없음"
+            # 강점 영역 (예시 포함)
+            strengths_detail = []
+            for s in req.strengths[:3]:  # 상위 3개
+                area = s.get("area", "")
+                score = s.get("score", 0)
+                examples = s.get("examples", [])
+                examples_text = ", ".join(examples[:2]) if examples else ""
+                strengths_detail.append(f"{area} ({score:.0f}점): {examples_text}")
+            strengths_text = "\n- ".join(strengths_detail) if strengths_detail else "없음"
 
-            # 성장 가능 영역
-            growth_areas_text = ", ".join([g.get("area", "") for g in req.growthAreas[:2]]) if req.growthAreas else "없음"
+            # 성장 가능 영역 (예시 포함)
+            growth_detail = []
+            for g in req.growthAreas[:3]:  # 상위 3개
+                area = g.get("area", "")
+                score = g.get("score", 0)
+                examples = g.get("examples", [])
+                examples_text = ", ".join(examples[:2]) if examples else ""
+                growth_detail.append(f"{area} ({score:.0f}점): {examples_text}")
+            growth_areas_text = "\n- ".join(growth_detail) if growth_detail else "없음"
 
             period_map = {"month": "한 달", "quarter": "3개월", "halfyear": "6개월"}
             period_text = period_map.get(req.period, "한 달")
@@ -79,31 +93,37 @@ async def generate_growth_evaluation(req: GrowthReportRequest):
 {after_text}
 
 **주요 변화**: {changes_text}
-**강점 영역**: {strengths_text}
-**성장 가능 영역**: {growth_areas_text}
+
+**강점 영역 (구체적 예시 포함)**:
+- {strengths_text}
+
+**성장 가능 영역 (구체적 예시 포함)**:
+- {growth_areas_text}
 
 조건:
-1. 최소 1000자 이상, 3-4개 문단으로 구성
+1. **최소 1000자 이상 작성 (매우 중요!)** - 3-4개 문단으로 구성
 2. 각 능력치의 의미를 쉽게 풀어서 설명 (예: 용기 → 새로운 도전을 두려워하지 않는 마음)
-3. 가장 크게 성장한 영역을 구체적으로 언급하고 칭찬
-4. 완료한 동화 개수를 바탕으로 아이의 노력 인정
+3. **강점 영역의 구체적 예시를 활용**하여 아이의 실제 행동을 언급하고 칭찬
+4. 완료한 동화 개수를 바탕으로 아이의 노력을 구체적으로 인정
 5. 긍정적이고 성장 가능성에 초점을 맞춘 격려
-6. 부모가 이해하기 쉬운 자연스러운 한국어
+6. 부모가 이해하기 쉬운 자연스럽고 따뜻한 한국어
 7. 평가문만 작성 (제목, 인사말, "~드립니다" 같은 결어 제외)
-8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 풍부하게 작성
+8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 **풍부하고 구체적으로** 작성
 9. 각 문단 사이에 빈 줄을 넣어 가독성 있게 작성
+10. **각 문단마다 최소 250자 이상 작성하여 전체 1000자 이상 달성**
+11. 영문은 제외하고 작성
 
-**구조**:
-- 1문단: 전체적인 성장 개요와 완료한 동화에 대한 칭찬
-- 2문단: 강점 영역에 대한 구체적인 설명과 격려
-- 3문단: 주요 변화와 발전 내용
-- 4문단: 성장 가능 영역과 앞으로의 기대감
+**구조 (각 문단 최소 250자 이상)**:
+- 1문단: 전체적인 성장 개요와 완료한 동화에 대한 칭찬 (아이의 노력과 성장을 풍부하게 표현)
+- 2문단: 강점 영역에 대한 구체적인 설명과 격려 (예시에 나온 구체적 행동을 언급하며 칭찬)
+- 3문단: 주요 변화와 발전 내용 (능력치 변화의 의미를 쉽게 풀어서 설명)
+- 4문단: 성장 가능 영역과 앞으로의 기대감 (부모와 함께 할 수 있는 방향 제시)
 """
             response = llm.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=2000
+                temperature=0.8,
+                max_tokens=2500
             )
 
             evaluation = response.choices[0].message.content.strip()
@@ -506,8 +526,27 @@ async def generate_all_growth_content(req: GrowthReportRequest):
                 if abs(change) > 5:
                     changes.append(f"{ability}: {change:+.0f}점")
             changes_text = ", ".join(changes) if changes else "전반적으로 안정적"
-            strengths_text = ", ".join([s.get("area", "") for s in req.strengths[:2]]) if req.strengths else "없음"
-            growth_areas_text = ", ".join([g.get("area", "") for g in req.growthAreas[:2]]) if req.growthAreas else "없음"
+
+            # 강점 영역 (예시 포함)
+            strengths_detail = []
+            for s in req.strengths[:3]:  # 상위 3개
+                area = s.get("area", "")
+                score = s.get("score", 0)
+                examples = s.get("examples", [])
+                examples_text = ", ".join(examples[:2]) if examples else ""
+                strengths_detail.append(f"{area} ({score:.0f}점): {examples_text}")
+            strengths_text = "\n- ".join(strengths_detail) if strengths_detail else "없음"
+
+            # 성장 가능 영역 (예시 포함)
+            growth_detail = []
+            for g in req.growthAreas[:3]:  # 상위 3개
+                area = g.get("area", "")
+                score = g.get("score", 0)
+                examples = g.get("examples", [])
+                examples_text = ", ".join(examples[:2]) if examples else ""
+                growth_detail.append(f"{area} ({score:.0f}점): {examples_text}")
+            growth_areas_text = "\n- ".join(growth_detail) if growth_detail else "없음"
+
             period_map = {"month": "한 달", "quarter": "3개월", "halfyear": "6개월"}
             period_text = period_map.get(req.period, "한 달")
 
@@ -525,25 +564,37 @@ async def generate_all_growth_content(req: GrowthReportRequest):
 {after_text}
 
 **주요 변화**: {changes_text}
-**강점 영역**: {strengths_text}
-**성장 가능 영역**: {growth_areas_text}
+
+**강점 영역 (구체적 예시 포함)**:
+- {strengths_text}
+
+**성장 가능 영역 (구체적 예시 포함)**:
+- {growth_areas_text}
 
 조건:
-1. 5-7문장으로 작성 (최소 200자 이상)
-2. 각 능력치의 의미를 쉽게 풀어서 설명
-3. 가장 크게 성장한 영역을 구체적인 예시와 함께 언급
-4. 완료한 동화 개수를 바탕으로 아이의 노력 인정
+1. **최소 1000자 이상 작성 (매우 중요!)** - 3-4개 문단으로 구성
+2. 각 능력치의 의미를 쉽게 풀어서 설명 (예: 용기 → 새로운 도전을 두려워하지 않는 마음)
+3. **강점 영역의 구체적 예시를 활용**하여 아이의 실제 행동을 언급하고 칭찬
+4. 완료한 동화 개수를 바탕으로 아이의 노력을 구체적으로 인정
 5. 긍정적이고 성장 가능성에 초점을 맞춘 격려
-6. 부모가 이해하기 쉬운 자연스러운 한국어
-7. 평가문만 작성 (제목, 인사말 제외)
-8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 풍부하게 작성
+6. 부모가 이해하기 쉬운 자연스럽고 따뜻한 한국어
+7. 평가문만 작성 (제목, 인사말, "~드립니다" 같은 결어 제외)
+8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 **풍부하고 구체적으로** 작성
+9. 각 문단 사이에 빈 줄을 넣어 가독성 있게 작성
+10. **각 문단마다 최소 250자 이상 작성하여 전체 1000자 이상 달성**
+
+**구조 (각 문단 최소 250자 이상)**:
+- 1문단: 전체적인 성장 개요와 완료한 동화에 대한 칭찬 (아이의 노력과 성장을 풍부하게 표현)
+- 2문단: 강점 영역에 대한 구체적인 설명과 격려 (예시에 나온 구체적 행동을 언급하며 칭찬)
+- 3문단: 주요 변화와 발전 내용 (능력치 변화의 의미를 쉽게 풀어서 설명)
+- 4문단: 성장 가능 영역과 앞으로의 기대감 (부모와 함께 할 수 있는 방향 제시)
 """
 
             eval_response = llm.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": eval_prompt}],
-                temperature=0.7,
-                max_tokens=600
+                temperature=0.8,
+                max_tokens=2500
             )
             result["evaluation"] = eval_response.choices[0].message.content.strip()
             logger.info(f"종합 평가 생성 완료: {len(result['evaluation'])}자")
