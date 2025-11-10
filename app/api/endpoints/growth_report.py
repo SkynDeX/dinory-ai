@@ -83,21 +83,27 @@ async def generate_growth_evaluation(req: GrowthReportRequest):
 **성장 가능 영역**: {growth_areas_text}
 
 조건:
-1. 25-30문장으로 작성 (최소 1000자 이상)
+1. 최소 1000자 이상, 3-4개 문단으로 구성
 2. 각 능력치의 의미를 쉽게 풀어서 설명 (예: 용기 → 새로운 도전을 두려워하지 않는 마음)
-3. 가장 크게 성장한 영역을 구체적인 예시와 함께 언급
+3. 가장 크게 성장한 영역을 구체적으로 언급하고 칭찬
 4. 완료한 동화 개수를 바탕으로 아이의 노력 인정
 5. 긍정적이고 성장 가능성에 초점을 맞춘 격려
 6. 부모가 이해하기 쉬운 자연스러운 한국어
 7. 평가문만 작성 (제목, 인사말, "~드립니다" 같은 결어 제외)
 8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 풍부하게 작성
-9. 줄바꿈, 들여쓰기 등을 사용하여 가독성 있게 작성
+9. 각 문단 사이에 빈 줄을 넣어 가독성 있게 작성
+
+**구조**:
+- 1문단: 전체적인 성장 개요와 완료한 동화에 대한 칭찬
+- 2문단: 강점 영역에 대한 구체적인 설명과 격려
+- 3문단: 주요 변화와 발전 내용
+- 4문단: 성장 가능 영역과 앞으로의 기대감
 """
             response = llm.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=600
+                max_tokens=2000
             )
 
             evaluation = response.choices[0].message.content.strip()
