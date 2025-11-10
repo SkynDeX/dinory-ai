@@ -213,7 +213,7 @@ class OpenAIService:
             **출력 형식 (JSON):**
             {{
             "abilityType": "용기/공감/창의성/책임감/우정 중 하나",
-            "abilityScore": 8-15,
+            "abilityScore": 10-15,
             "feedback": "아이에게 전할 긍정적인 피드백 (1-2문장)",
             "nextSceneBranch": null
             }}

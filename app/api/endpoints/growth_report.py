@@ -83,7 +83,7 @@ async def generate_growth_evaluation(req: GrowthReportRequest):
 **성장 가능 영역**: {growth_areas_text}
 
 조건:
-1. 10-15문장으로 작성 (최소 400자 이상)
+1. 25-30문장으로 작성 (최소 1000자 이상)
 2. 각 능력치의 의미를 쉽게 풀어서 설명 (예: 용기 → 새로운 도전을 두려워하지 않는 마음)
 3. 가장 크게 성장한 영역을 구체적인 예시와 함께 언급
 4. 완료한 동화 개수를 바탕으로 아이의 노력 인정
@@ -91,6 +91,7 @@ async def generate_growth_evaluation(req: GrowthReportRequest):
 6. 부모가 이해하기 쉬운 자연스러운 한국어
 7. 평가문만 작성 (제목, 인사말, "~드립니다" 같은 결어 제외)
 8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 풍부하게 작성
+9. 줄바꿈, 들여쓰기 등을 사용하여 가독성 있게 작성
 """
             response = llm.client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -369,17 +370,18 @@ async def generate_strength_descriptions(req: GrowthReportRequest):
 아이가 {area_name} 능력에서 {score}점을 기록하며 뛰어난 모습을 보였습니다.
 {f"예시: {', '.join(examples)}" if examples else ""}
 
-이 강점을 칭찬하고 격려하는 설명을 작성해주세요.
+이 강점을 부모에게 보고하는 설명을 작성해주세요.
 
 다음 JSON 형식으로만 응답하세요:
 {{
-  "description": "{area_name}의 의미를 쉽게 설명하고, 왜 대단한지 40자 이내로"
+  "description": "{area_name}의 의미를 쉽게 설명하고, 아이의 강점을 3인칭으로 설명 (예: 아이는, 아이의) 40자 이내"
 }}
 
 조건:
-1. 아이의 성취를 구체적으로 칭찬
-2. {area_name} 능력의 의미를 쉽게 풀어서 설명
-3. 따뜻하고 격려하는 어조
+1. 부모에게 보고하는 형식 (3인칭: 아이는, 아이의)
+2. 아이의 성취를 구체적으로 칭찬
+3. {area_name} 능력의 의미를 쉽게 풀어서 설명
+4. 따뜻하고 격려하는 어조
 """
 
             try:
@@ -636,10 +638,10 @@ JSON: {{"achievement": "축하 문구 (25자 이내, {ability}의 의미 쉽게 
 
             try:
                 st_prompt = f"""
-아이가 {area_name} 능력에서 {score}점을 기록. {f"예시: {', '.join(examples)}" if examples else ""}
-칭찬하는 설명을 작성해주세요.
-JSON: {{"description": "{area_name}의 의미를 쉽게 설명하고, 왜 대단한지 40자 이내로"}}
-조건: 구체적 칭찬, 쉬운 설명, 따뜻한 어조
+아이가 {area_name} 능력에서 {score}점을 기록했습니다. {f"예시: {', '.join(examples)}" if examples else ""}
+이 강점을 부모에게 보고하는 설명을 작성해주세요.
+JSON: {{"description": "{area_name}의 의미를 쉽게 설명하고, 아이의 강점을 3인칭으로 설명 (예: 아이는, 아이의) 40자 이내"}}
+조건: 부모에게 보고하는 형식, 3인칭 사용, 구체적 칭찬, 따뜻한 어조
 """
                 st_resp = llm.client.chat.completions.create(
                     model="gpt-4o-mini",
