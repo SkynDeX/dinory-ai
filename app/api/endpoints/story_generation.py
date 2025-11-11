@@ -831,9 +831,12 @@ async def create_image_prompt(req: CreateImagePromptRequest):
                         image_prompt = image_prompt.replace(keyword, "anime style")
                         logger.warning(f"금지된 키워드 '{keyword}' 제거하고 anime style로 대체")
 
-                # 프롬프트 길이 제한
-                if len(image_prompt) > req.maxLength:
-                    image_prompt = image_prompt[:req.maxLength].rsplit(' ', 1)[0]  # 마지막 단어가 잘리지 않도록
+                # [2025-11-11 수정] 프롬프트 길이 제한 완화 - 필수 키워드 추가 후에는 잘리지 않도록
+                # Pollinations AI는 긴 프롬프트도 잘 처리하므로 여유있게 설정
+                max_allowed_length = max(req.maxLength, len(image_prompt))  # 필수 키워드 추가 후 길이가 maxLength를 초과해도 허용
+                if len(image_prompt) > max_allowed_length + 100:  # 너무 길면 (maxLength + 100자 초과) 잘라냄
+                    image_prompt = image_prompt[:max_allowed_length + 100].rsplit(' ', 1)[0]
+                    logger.warning(f"프롬프트가 너무 길어서 잘림: {len(image_prompt)} → {max_allowed_length + 100}자")
 
                 logger.info(f"프롬프트 생성 완료: {image_prompt}")
 
