@@ -240,20 +240,23 @@ class MemoryService:
                 top_k=5
             )
 
-        # 컨텍스트 요약 생성
-        summary = self._create_context_summary(
+        # 컨텍스트 요약 생성 (아이 이름 포함)
+        summary_result = self._create_context_summary(
             recent_convs,
             story_completions,
             similar_convs
         )
 
         print(f"✅ Memory retrieved: {len(recent_convs)} recent, {len(similar_convs)} similar, {len(story_completions)} stories")
+        if summary_result.get("child_name"):
+            print(f"👤 아이 이름 추출: {summary_result['child_name']}")
 
         return {
             "recent_conversations": recent_convs,
             "similar_conversations": similar_convs,
             "story_completions": story_completions,
-            "summary": summary
+            "summary": summary_result["summary"],
+            "child_name": summary_result.get("child_name")  # [2025-11-11 추가]
         }
 
     def _create_context_summary(
@@ -261,16 +264,29 @@ class MemoryService:
         recent_convs: List[Dict],
         story_completions: List[Dict],
         similar_convs: List[Dict]
-    ) -> str:
-        """컨텍스트를 AI가 이해하기 쉬운 텍스트로 요약"""
+    ) -> Dict[str, Any]:
+        """
+        [2025-11-11 수정] 컨텍스트를 AI가 이해하기 쉬운 텍스트로 요약
+        Returns:
+            {
+                "summary": "요약 텍스트",
+                "child_name": "아이 이름" (있으면)
+            }
+        """
 
         summary_parts = []
+        child_name = None
 
         # 1. 동화 완료 기록
         if story_completions:
             summary_parts.append("**완료한 동화:**")
             for story in story_completions[:3]:  # 최근 3개만
                 title = story.get('storyTitle', '알 수 없음')  # camelCase로 변경!
+
+                # [2025-11-11 추가] 첫 번째 동화에서 아이 이름 추출
+                if child_name is None:
+                    child_name = story.get('childName')
+
                 # 능력치 정보 추출 (Java DTO의 total* 필드들)
                 abilities = {
                     'courage': story.get('totalCourage', 0),
@@ -288,14 +304,25 @@ class MemoryService:
             topics = self._extract_topics_from_conversations(recent_convs[:5])
             summary_parts.append(f"  - {topics}")
 
-        # 3. 유사한 과거 대화 (있으면)
+        # 3. 유사한 과거 대화 (있으면) - [2025-11-11 수정] 전체 내용 포함
         if similar_convs:
-            summary_parts.append("\n**관련된 과거 대화:**")
-            for conv in similar_convs[:2]:  # 상위 2개만
-                msg = conv.get('message', '')[:50]  # 50자만
-                summary_parts.append(f"  - '{msg}...'")
+            summary_parts.append("\n**관련된 과거 대화 (시맨틱 검색 결과):**")
+            for idx, conv in enumerate(similar_convs[:5], 1):  # 상위 5개
+                user_msg = conv.get('message', '')
+                ai_response = conv.get('response', '')
+                score = conv.get('score', 0)
 
-        return "\n".join(summary_parts) if summary_parts else "이전 대화 기록 없음"
+                # 전체 내용 포함 (잘라내지 않음)
+                summary_parts.append(f"  {idx}. [유사도: {score:.2f}]")
+                summary_parts.append(f"     사용자: {user_msg}")
+                summary_parts.append(f"     AI: {ai_response}")
+
+        summary_text = "\n".join(summary_parts) if summary_parts else "이전 대화 기록 없음"
+
+        return {
+            "summary": summary_text,
+            "child_name": child_name
+        }
 
     def _format_abilities(self, abilities: Dict[str, int]) -> str:
         """능력치를 간단한 텍스트로"""

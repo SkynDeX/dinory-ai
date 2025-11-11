@@ -155,8 +155,8 @@ class ChatbotServiceWithRAG:
         - 최근 10개 대화만 복원 (너무 많으면 토큰 초과)
         """
         try:
-            print(f"📥 세션 {session_id}의 과거 대화 복원 시작...")
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            print(f"📥 세션 {session_id}의 과거 대화 복원 시작 (Spring API)...")
+            async with httpx.AsyncClient(timeout=30.0) as client:  # [2025-11-11] 타임아웃 10→30초
                 response = await client.get(
                     f"{self.spring_api_url}/chat/{session_id}"
                 )
@@ -193,8 +193,12 @@ class ChatbotServiceWithRAG:
                 self.conversation_history[session_id] = restored_history
                 print(f"✅ 세션 {session_id}의 과거 대화 {len(restored_history)}개 복원 완료")
 
+        except httpx.TimeoutException as e:
+            print(f"⏱️ 세션 {session_id} 복원 타임아웃 (30초 초과): {e}")
+            # 실패해도 빈 배열로 초기화
+            self.conversation_history[session_id] = []
         except Exception as e:
-            print(f"⚠️ 세션 {session_id} 복원 실패: {e}")
+            print(f"⚠️ 세션 {session_id} 복원 실패 (상세): {type(e).__name__} - {str(e)}")
             # 실패해도 빈 배열로 초기화
             self.conversation_history[session_id] = []
 
@@ -238,11 +242,22 @@ class ChatbotServiceWithRAG:
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 print(f"ℹ️ [LoadStoryContext] 이 세션은 story_completion과 연결되지 않음")
+            elif e.response.status_code == 401:
+                print(f"ℹ️ [LoadStoryContext] 인증 오류 (401) - story_completion 없음으로 간주")
             else:
-                print(f"❌ [LoadStoryContext] HTTP 오류: {e}")
+                print(f"❌ [LoadStoryContext] HTTP 오류: {e.response.status_code} {e}")
+
+            # [2025-11-11 수정] 모든 HTTP 에러 시 일상 대화 모드로 전환 (story_context 삭제)
+            if session_id in self.story_context:
+                del self.story_context[session_id]
+                print(f"🗑️ [LoadStoryContext] 일상 대화 모드로 전환: story_context 삭제 완료 (scenes/choices 제거)")
             return None
         except Exception as e:
             print(f"❌ [LoadStoryContext] 로드 실패: {e}")
+            # [2025-11-11 추가] 예외 발생 시에도 story_context 삭제 (안전장치)
+            if session_id in self.story_context:
+                del self.story_context[session_id]
+                print(f"🗑️ [LoadStoryContext] 예외 발생으로 story_context 삭제")
             return None
 
     async def _analyze_dino_emotion(
@@ -343,9 +358,14 @@ JSON 형식으로만 응답하세요:
         # 1. 동화 컨텍스트 (현재 세션에 동화 정보가 있으면)
         story_context_text = ""
 
-        # [2025-11-05 추가] story_context가 없으면 백엔드에서 로드 시도
-        if session_id not in self.story_context:
-            await self._load_story_context_from_backend(session_id)
+        # [2025-11-11 수정] 매번 백엔드에서 story_context 상태 확인 (일상 대화 전환 감지)
+        await self._load_story_context_from_backend(session_id)
+
+        # [2025-11-11 추가] 대화 모드 판별 로그
+        if session_id in self.story_context:
+            print(f"📖 [BuildPrompt] 동화 후기 대화 모드: scene/choices 포함")
+        else:
+            print(f"💬 [BuildPrompt] 일상 대화 모드: scene/choices 제외, 최근 동화 목록만 포함")
 
         if session_id in self.story_context:
             story_info = self.story_context[session_id]
@@ -429,6 +449,8 @@ JSON 형식으로만 응답하세요:
 
             print(f"★ [BuildPrompt] 메모리 조회 결과:")
             print(f"   - story_completions: {len(memory_context.get('story_completions', []))}개")
+            print(f"   - similar_conversations: {len(memory_context.get('similar_conversations', []))}개 (시맨틱 검색)")
+            print(f"   - recent_conversations: {len(memory_context.get('recent_conversations', []))}개")
             print(f"   - summary 길이: {len(memory_context.get('summary', ''))} 문자")
             if memory_context.get("story_completions"):
                 print(f"   - 첫 번째 동화: {memory_context['story_completions'][0].get('storyTitle', 'N/A')}")
@@ -438,10 +460,25 @@ JSON 형식으로만 응답하세요:
 **아이의 기억 (과거 기록):**
 {memory_context["summary"]}
 
-**대화 지침:**
-- 아이가 과거에 읽은 동화나 이전 대화를 물어보면 위 기록을 참고하세요
-- "지난번에 뭐 읽었어?", "전에 무슨 얘기했지?" 같은 질문에 답변하세요
-- 자연스럽게 과거 경험을 언급하며 대화를 이어가세요
+**🔍 중요한 대화 지침 - 과거 대화 기반 답변:**
+1. **아이 이름 질문 대응:**
+   - 아이가 "내 이름이 뭐야?", "나 누구야?", "내가 누군지 알아?" 등을 물어보면
+   - 위의 "관련된 과거 대화"에서 아이 이름이 언급된 대화를 찾으세요
+   - 예: "안녕 민수야" → 이름은 민수
+   - 과거 대화에 이름이 있으면 그 이름을 정확히 알려주세요
+
+2. **과거 대화 내용 참조:**
+   - "내가 뭐라고 했어?", "전에 무슨 얘기했지?" 같은 질문에는
+   - 위의 "관련된 과거 대화"에서 해당 내용을 찾아서 정확히 답변하세요
+   - 시맨틱 검색으로 찾은 대화가 관련도 높은 순서로 정렬되어 있습니다
+
+3. **동화 기록 참조:**
+   - "지난번에 무슨 동화 읽었어?" 같은 질문에는
+   - 위의 "완료한 동화" 목록을 참고하세요
+
+4. **자연스러운 대화:**
+   - 과거 기록을 참고하되, 너무 기계적이지 않게 자연스럽게 대화하세요
+   - 아이의 이전 경험을 언급하며 친근하게 이야기하세요
 """
                 print(f"★ [BuildPrompt] ✅ 메모리 컨텍스트 프롬프트에 포함")
             else:
@@ -477,6 +514,8 @@ JSON 형식으로만 응답하세요:
 
         if "아이의 기억 (과거 기록)" in enhanced_prompt:
             print(f"★ [BuildPrompt] ✅ 프롬프트에 'RAG 메모리' 포함됨")
+            if "관련된 과거 대화 (시맨틱 검색 결과)" in enhanced_prompt:
+                print(f"★ [BuildPrompt] ✅ Pinecone 시맨틱 검색 결과 포함 (이름/과거 대화 참조 가능)")
         else:
             print(f"★ [BuildPrompt] ❌ 프롬프트에 'RAG 메모리' 없음!")
 
