@@ -13,8 +13,8 @@ RUN apt-get update && \
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (CPU 전용 PyTorch 인덱스 사용)
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Copy application code
 COPY . .

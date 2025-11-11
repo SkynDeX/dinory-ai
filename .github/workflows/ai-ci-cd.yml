@@ -73,9 +73,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest
-            ${{ secrets.DOCKER_USERNAME }}/dinory-ai:${{ github.sha }}
+          tags: ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -90,25 +88,27 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            # 배포 디렉토리로 이동
-            cd /home/${{ secrets.AI_SERVER_USERNAME }}/dinory
+            # 배포 디렉토리 및 compose 파일 경로 설정
+            BASE_DIR="/home/${{ secrets.AI_SERVER_USERNAME }}/dinory"
+            COMPOSE_FILE="$BASE_DIR/dinory-etc/deployment/instance2/docker-compose.instance2.yml"
+            cd "$BASE_DIR"
 
-            # 최신 이미지 가져오기
-            docker pull ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest
+            # 최신 이미지 pull (docker-compose v1)
+            docker-compose -f "$COMPOSE_FILE" pull ai-server
 
             # 기존 컨테이너 중지 및 제거
-            docker-compose -f docker-compose.instance2.yml stop ai-server 2>/dev/null || true
-            docker-compose -f docker-compose.instance2.yml rm -f ai-server 2>/dev/null || true
+            docker-compose -f "$COMPOSE_FILE" stop ai-server 2>/dev/null || true
+            docker-compose -f "$COMPOSE_FILE" rm -f ai-server 2>/dev/null || true
 
             # 새 컨테이너 시작
-            docker-compose -f docker-compose.instance2.yml up -d ai-server
+            docker-compose -f "$COMPOSE_FILE" up -d ai-server
 
             # 컨테이너 상태 확인 (10초 대기 후)
             sleep 10
-            docker-compose -f docker-compose.instance2.yml ps ai-server
+            docker-compose -f "$COMPOSE_FILE" ps ai-server
 
             # 로그 확인 (최근 20줄)
-            docker-compose -f docker-compose.instance2.yml logs --tail 20 ai-server
+            docker-compose -f "$COMPOSE_FILE" logs --tail 20 ai-server
 
             # 사용하지 않는 이미지 정리
             docker image prune -f
