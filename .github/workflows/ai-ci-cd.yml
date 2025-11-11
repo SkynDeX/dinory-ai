@@ -1,0 +1,123 @@
+#########################################
+# Dinory AI 서버 CI/CD 워크플로우
+#
+# 이 파일은 AI 서버 코드가 변경될 때 자동으로:
+# 1. FastAPI 앱을 검증하고
+# 2. Docker 이미지를 생성하고
+# 3. Docker Hub에 업로드하고
+# 4. 서버에 배포합니다
+#########################################
+
+name: AI Server CI/CD
+
+# 🎯 언제 실행할까요?
+on:
+  push:
+    branches:
+      - main              # main 브랜치에 push할 때
+      - develop           # develop 브랜치에 push할 때
+
+  workflow_dispatch:      # 수동 실행 가능
+
+# 🔧 작업 정의
+jobs:
+  build-and-deploy:
+    name: 빌드 및 배포
+    runs-on: ubuntu-latest
+
+    steps:
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 1: 코드 가져오기
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 📥 코드 체크아웃
+        uses: actions/checkout@v4
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 2: Python 설정
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🐍 Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'          # pip 캐시 사용 (빌드 속도 향상)
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 3: 의존성 검증 (선택사항)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # 테스트를 실행하려면 아래 주석을 해제하세요
+      # - name: 🧪 의존성 설치 및 검증
+      #   run: |
+      #     pip install -r requirements.txt
+      #     python -c "import fastapi; print('FastAPI 설치 확인 완료')"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 4: Docker 설정
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🐳 Docker Buildx 설정
+        uses: docker/setup-buildx-action@v3
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 5: Docker Hub 로그인
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🔐 Docker Hub 로그인
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 6: Docker 이미지 빌드 & 푸시
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🏗️ Docker 이미지 빌드 및 푸시
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest
+            ${{ secrets.DOCKER_USERNAME }}/dinory-ai:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 7: 서버에 배포 (인스턴스 #2)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🚀 서버 배포
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.AI_SERVER_HOST }}      # 152.69.232.28
+          username: ${{ secrets.AI_SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            # 배포 디렉토리로 이동
+            cd /home/${{ secrets.AI_SERVER_USERNAME }}/dinory
+
+            # 최신 이미지 가져오기
+            docker pull ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest
+
+            # 기존 컨테이너 중지 및 제거
+            docker-compose -f docker-compose.instance2.yml stop ai-server 2>/dev/null || true
+            docker-compose -f docker-compose.instance2.yml rm -f ai-server 2>/dev/null || true
+
+            # 새 컨테이너 시작
+            docker-compose -f docker-compose.instance2.yml up -d ai-server
+
+            # 컨테이너 상태 확인 (10초 대기 후)
+            sleep 10
+            docker-compose -f docker-compose.instance2.yml ps ai-server
+
+            # 로그 확인 (최근 20줄)
+            docker-compose -f docker-compose.instance2.yml logs --tail 20 ai-server
+
+            # 사용하지 않는 이미지 정리
+            docker image prune -f
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 8: 배포 완료 알림
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: ✅ 배포 완료
+        run: |
+          echo "🎉 AI 서버 배포가 완료되었습니다!"
+          echo "📦 이미지: ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest"
+          echo "🔗 커밋: ${{ github.sha }}"
