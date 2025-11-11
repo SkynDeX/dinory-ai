@@ -251,6 +251,7 @@ class OpenAIService:
             story_description: str,
             emotion: str,
             interests: List[str],
+            concerns: List[str],  # [2025-11-11 김광현 추가] 자녀 우려사항
             scene_number: int,
             previous_choices: List[Dict],
             story_context: Optional[str] = None,
@@ -265,6 +266,7 @@ class OpenAIService:
             story_description: 동화 설명
             emotion: 현재 감정
             interests: 관심사 리스트
+            concerns: 자녀 우려사항 리스트
             scene_number: 생성할 씬 번호 (1~8)
             previous_choices: 이전 선택들 [{"sceneNumber": 1, "choiceText": "...", "abilityType": "용기"}]
             story_context: 이전까지의 스토리 흐름 (optional)
@@ -279,7 +281,7 @@ class OpenAIService:
         try:
             # 프롬프트 생성
             prompt = self._create_next_scene_prompt(
-                story_title, story_description, emotion, interests, scene_number, previous_choices, story_context, character_description
+                story_title, story_description, emotion, interests, concerns, scene_number, previous_choices, story_context, character_description
             )
 
             logger.info(f'씬 {scene_number} 생성 중... (스토리: {story_title}, 이전 선택: {len(previous_choices)}개)')
@@ -351,6 +353,7 @@ class OpenAIService:
             story_description: str,
             emotion: str,
             interests: List[str],
+            concerns: List[str],  # [2025-11-11 추가] 자녀 우려사항
             scene_number: int,
             previous_choices: List[Dict],
             story_context: Optional[str],
@@ -360,9 +363,11 @@ class OpenAIService:
 
         story_title과 story_description 기반으로 스토리 생성
         childName은 주인공 이름으로 사용하지 않음
+        [2025-11-11 추가] concerns를 통한 맞춤형 동화 생성
         """
 
         interests_text = ", ".join(interests) if interests else "친구와 우정"
+        concerns_text = ", ".join(concerns) if concerns else None
 
         # 이전 선택 요약 및 능력치 분석
         choices_summary = ""
@@ -437,6 +442,63 @@ class OpenAIService:
             - 캐릭터의 종류나 외모를 절대 바꾸지 마세요
             """
 
+        # 씬별 스토리 가이드 (기승전결)
+        story_phase = ""
+        if scene_number == 1:
+            story_phase = """
+            **[씬 1 - 기(起): 시작]**
+            - 주인공과 배경 소개
+            - 평화롭거나 일상적인 상황에서 시작
+            - 앞으로 펼쳐질 모험의 단서 제시
+            """
+        elif scene_number <= 3:
+            story_phase = """
+            **[씬 2-3 - 승(承): 전개]**
+            - 사건이 시작되거나 문제가 등장
+            - 주인공이 새로운 상황에 직면
+            - 호기심을 자극하는 요소 추가
+            """
+        elif scene_number <= 6:
+            story_phase = """
+            **[씬 4-6 - 전(轉): 절정]**
+            - 갈등이나 도전이 최고조에 달함
+            - 주인공의 선택이 중요해지는 순간
+            - 긴장감 있는 상황 연출
+            """
+        else:  # scene_number == 7 or 8
+            story_phase = """
+            **[씬 7-8 - 결(結): 결말]**
+            - 이야기의 마무리 단계
+            - 지금까지의 선택과 행동의 결과 보여주기
+            - 따뜻하고 긍정적인 결말로 마무리
+            """
+
+        # 마지막 씬 처리
+        ending_note = ""
+        if scene_number == 8:
+            ending_note = """
+
+            **[최종 씬 - 선택지 없음!]**
+            - 이 씬은 동화의 마지막이므로 **choices를 빈 배열 []로 반환**하세요
+            - 주인공이 지금까지의 모험을 통해 배운 교훈이나 성장 포함
+            - "그리하여 [주인공]은 행복하게 살았답니다" 같은 동화 결말 문구 사용
+            - 아이에게 따뜻한 메시지 전달 (예: "용기", "친구", "배려")
+            """
+
+        # 우려사항 안내 추가
+        concerns_note = ""
+        if concerns_text:
+            concerns_note = f"""
+
+            **[매우 중요] 자녀 우려사항 반영:**
+            부모가 다음과 같은 우려사항을 가지고 있습니다: {concerns_text}
+            - 이 우려사항과 관련된 상황을 동화에 자연스럽게 포함시키세요
+            - 주인공이 이러한 문제를 긍정적으로 해결하는 모습을 보여주세요
+            - 아이가 배울 수 있는 교훈이나 올바른 행동을 제시하세요
+            - 예시: "낯가림"이 우려사항이면 → 새로운 친구를 만나 용기내어 인사하는 이야기
+            - 예시: "떼쓰기"가 우려사항이면 → 참을성 있게 기다리고 좋은 결과를 얻는 이야기
+            """
+
         prompt = f"""
             '{story_title}' 동화의 씬 {scene_number}을 생성해주세요.
 
@@ -445,8 +507,11 @@ class OpenAIService:
             - 줄거리: {story_description}
             - 주제/감정: {emotion}
             - 관심 요소: {interests_text}
+            {concerns_note}
 
             {character_note}
+
+            {story_phase}
 
             {stage_guide}
 
@@ -588,6 +653,8 @@ class OpenAIService:
 
         **[최종 체크리스트 - 반드시 확인!]**
         ✅ 씬 1에서는 storyTitle을 **scene 밖에** 별도로 포함
+        ✅ 씬 8(마지막)은 **choices를 빈 배열 []로 반환** (선택지 없음)
+        ✅ 씬 번호에 맞는 스토리 단계(기승전결) 준수
         ✅ 모든 동화 내용(content, choiceText)은 **100% 순수 한글** (영어 단어 금지!)
         ✅ 주인공 호칭: "네가", "너는" 금지 → "작은 토끼가", "꼬마 로봇은" 사용
         ✅ 3인칭 서술: "작은 토끼가 ~했어요" (O) / "네가 ~했어" (X)
@@ -693,6 +760,7 @@ class OpenAIService:
             story_description: str,
             emotion: str,
             interests: List[str],
+            concerns: List[str],  # [2025-11-11 김광현 추가] 자녀 우려사항
             scene_number: int,
             previous_choices: List[Dict],
             story_context: Optional[str] = None,
@@ -703,10 +771,11 @@ class OpenAIService:
 
         [2025-10-28 수정] story_title, story_description 추가
         [2025-11-05 수정] character_description 추가
+        [2025-11-11 수정] concerns 추가
         childName 제거 - 동화 주인공으로 사용하지 않음
         """
         return self.generate_next_scene(
-            story_id, story_title, story_description, emotion, interests,
+            story_id, story_title, story_description, emotion, interests, concerns,
             scene_number, previous_choices, story_context, character_description
         )
 

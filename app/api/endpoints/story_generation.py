@@ -93,6 +93,7 @@ class NextSceneRequest(BaseModel):
     childId: int = Field(validation_alias=AliasChoices('childId', 'child_id'))
     emotion: Optional[str] = None
     interests: Optional[List[str]] = None
+    concerns: Optional[List[str]] = None  # 자녀 우려사항 추가
     sceneNumber: int = Field(validation_alias=AliasChoices('sceneNumber', 'scene_number'))
     previousChoices: Optional[List[Dict[str, Any]]] = Field(default_factory=list, validation_alias=AliasChoices('previousChoices', 'previous_choices'))
 
@@ -268,6 +269,7 @@ async def generate_next_scene(req: NextSceneRequest):
 
                 # [2025-10-28 수정] Story의 title과 description을 OpenAI로 전달
                 # [2025-11-05 수정] character_description 추가
+                # [2025-11-11 수정] concerns 추가
                 # childName은 제거 - 동화 주인공으로 사용하지 않음
                 result = await llm.generate_next_scene_async(
                     story_id=req.storyId,
@@ -275,6 +277,7 @@ async def generate_next_scene(req: NextSceneRequest):
                     story_description=req.storyDescription or "",
                     emotion=req.emotion or "중립",
                     interests=req.interests or [],
+                    concerns=req.concerns or [],  # 우려사항 추가
                     scene_number=req.sceneNumber,
                     previous_choices=req.previousChoices or [],
                     story_context=story_context if story_context else None,
