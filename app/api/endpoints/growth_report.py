@@ -111,7 +111,7 @@ async def generate_growth_evaluation(req: GrowthReportRequest):
 8. 데이터가 부족하더라도 아이의 잠재력과 가능성을 중심으로 **풍부하고 구체적으로** 작성
 9. 각 문단 사이에 빈 줄을 넣어 가독성 있게 작성
 10. **각 문단마다 최소 250자 이상 작성하여 전체 1000자 이상 달성**
-11. 영문은 제외하고 작성
+11. 영문은 반드시 제외!
 
 **구조 (각 문단 최소 250자 이상)**:
 - 1문단: 전체적인 성장 개요와 완료한 동화에 대한 칭찬 (아이의 노력과 성장을 풍부하게 표현)
@@ -730,41 +730,70 @@ JSON: {{"description": "{area_name}의 의미를 쉽게 설명하고, 아이의 
         for area_info in req.growthAreas[:3]:
             area_name = area_info.get("area", "")
             score = area_info.get("score", 0)
+            examples = area_info.get("examples", [])
 
             try:
+                # 예시를 텍스트로 변환
+                examples_text = ""
+                if examples:
+                    examples_text = f"\n\n**아이가 선택한 예시**\n" + "\n".join([f"- {ex}" for ex in examples[:3]])
                 ga_prompt = f"""
-아이의 {area_name} 능력(현재 {score}점)을 발전시키기 위한 설명과 추천.
-JSON: {{"description": "{area_name}의 의미와 왜 중요한지 30자 이내", "recommendation": "구체적 활동 1가지 40자 이내"}}
-조건: 실천 가능, 부드러운 어조
+아이의 {area_name} 능력(현재 {score}점)을 발전시키기 위한 구체적인 분석과 추천을 작성해주세요.{examples_text}
+부모에게 전달할 내용을 다음 JSON 형식으로 작성하세요:
+{{
+  "description": "100-150자 이내의 상세한 설명",
+  "recommendation": "60-80자 이내의 구체적이고 실천 가능한 활동"
+}}
+
+**description 작성 가이드**:
+1. {area_name} 능력이 무엇인지 쉽게 설명 (예: 용기 → 새로운 것에 도전하는 마음)
+2. 위 예시들을 언급하며 아이의 현재 상황을 구체적으로 설명
+   - 예시가 있으면: "~에서 ~를 선택했는데, 이는..."
+   - 예시가 없으면: "아직 이 능력을 보여줄 기회가 적었습니다."
+3. 왜 이 능력이 중요한지 부모 관점에서 설명
+4. 3인칭 사용 (예: 아이는, 아이가, 아이의)
+
+**recommendation 작성 가이드**:
+1. 일상에서 바로 실천 가능한 구체적인 활동 제시
+2. 부모와 함께 할 수 있는 활동
+3. 아이의 흥미를 끌 수 있는 재미있는 방법
+4. "~해보세요", "~하면 좋습니다" 등 제안하는 어조
+5. {area_name} 관련 동화 읽기를 포함하되, 추가 액션 아이템도 제시
+
+**어조**: 따뜻하고 격려하는, 전문가가 부모에게 조언하는 톤
 """
                 ga_resp = llm.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": ga_prompt}],
                     response_format={"type": "json_object"},
-                    temperature=0.7
+                    temperature=0.7,
+                    max_tokens=500  # 더 긴 응답을 위해 증가
                 )
                 ga_data = json.loads(ga_resp.choices[0].message.content)
                 growth_descs.append({
                     "area": area_name,
                     "score": score,
                     "description": ga_data.get("description", ""),
-                    "recommendation": ga_data.get("recommendation", "")
+                    "recommendation": ga_data.get("recommendation", ""),
+                    "examples": examples  # 예시도 반환
                 })
+
             except Exception as e:
                 logger.error(f"{area_name} 성장영역 설명 실패: {e}")
                 growth_descs.append({
                     "area": area_name,
                     "score": score,
                     "description": f"{area_name} 영역을 더 발전시킬 수 있습니다.",
-                    "recommendation": f"{area_name} 관련 동화를 함께 읽어보세요."
+                    "recommendation": f"{area_name} 관련 동화를 함께 읽어보세요.",
+                    "examples": examples
                 })
-
-        result["growthAreaDescriptions"] = growth_descs
+        
+        result ["growthAreaDescriptions"] = growth_descs
         logger.info(f"성장영역 설명 생성 완료: {len(growth_descs)}개")
 
         logger.info("통합 AI 콘텐츠 생성 완료")
         return result
-
+    
     except Exception as e:
         logger.exception("generate-all-growth-content 실패")
         raise HTTPException(status_code=500, detail=str(e))
