@@ -276,8 +276,96 @@ class StorySearchService:
             return enriched_stories
         except Exception as e:
             logger.error(f"❌ AI 줄거리 일괄 생성 실패: {str(e)}")
-            # 실패해도 필터링된 stories 반환
+            # 실패해도 원본 stories 반환
             return filtered_stories
+    
+    # [2025-11-12 김광현] 랜덤 동화 추가
+    async def get_random_stories_async(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        [2025-11-12 김광현] Pinecone에서 랜덤 동화 가져오기
+        
+        로그인하지 않은 사용자를 위한 메서드.
+        랜덤 벡터로 Pinecone 검색하여 무작위 동화 반환.
+        
+        Args:
+            limit: 가져올 동화 개수
+            
+        Returns:
+            랜덤 동화 목록 (ai_summary 포함)
+        """
+        if not self.index:
+            logger.warning("Pinecone 인덱스 미연결 → 더미 반환")
+            return self._normalize(self._get_dummy_stories(None, [], limit))
+        
+        try:
+            # 랜덤 벡터 생성 (OpenAI embedding dimension: 3072)
+            import random
+            random_vector = [random.random() for _ in range(3072)]
+            
+            logger.info(f"랜덤 동화 검색 중... (limit: {limit})")
+            
+            # Pinecone 검색
+            results = self.index.query(
+                vector=random_vector, 
+                top_k=limit * 2,  # 중복 제거를 위해 여유있게
+                include_metadata=True
+            )
+            
+            matches = getattr(results, "matches", None) or results.get("matches", [])
+            
+            stories = []
+            seen_ids = set()
+            
+            # AI 줄거리 생성 준비
+            from app.services.llm.openai_service import OpenAIService
+            import asyncio
+            openai_service = OpenAIService()
+            
+            async def process_story(m):
+                """각 동화 처리 (중복 제거 + AI 줄거리 생성)"""
+                mid = getattr(m, "id", None) or m.get("id")
+                
+                # 중복 체크
+                if mid in seen_ids:
+                    return None
+                seen_ids.add(mid)
+                
+                score = getattr(m, "score", None) or m.get("score", 0.5)
+                meta = getattr(m, "metadata", None) or m.get("metadata", {}) or {}
+                story_title = meta.get("title", "제목 없음")
+                
+                # AI 줄거리 생성
+                try:
+                    ai_summary = await openai_service.generate_story_summary(story_title)
+                    meta["ai_summary"] = ai_summary
+                    logger.info(f"랜덤 동화 줄거리: {story_title[:20]}... → {ai_summary[:30]}...")
+                except Exception as e:
+                    logger.warning(f"줄거리 생성 실패: {story_title}")
+                    fallback = meta.get("plotSummaryText") or f"{story_title}의 이야기예요."
+                    meta["ai_summary"] = fallback
+                
+                return {
+                    "story_id": mid,
+                    "title": story_title,
+                    "matching_score": int(float(score) * 100),  # 0-100 점수
+                    "metadata": meta,
+                }
+            
+            # 병렬 처리
+            tasks = [process_story(m) for m in matches]
+            processed = await asyncio.gather(*tasks)
+            
+            # None 제거 및 limit 적용
+            stories = [s for s in processed if s is not None][:limit]
+            
+            logger.info(f"랜덤 동화 {len(stories)}개 반환 완료")
+            
+            return self._normalize(stories)
+            
+        except Exception as e:
+            logger.error(f"랜덤 동화 검색 오류: {e}")
+            return self._normalize(self._get_dummy_stories(None, [], limit))
+        
 
     def get_story_by_id(self, story_id: str) -> Optional[Dict[str, Any]]:
         if not self.index:

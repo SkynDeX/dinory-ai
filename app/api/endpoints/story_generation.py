@@ -38,6 +38,7 @@ class RecommendStoriesRequest(BaseModel):
     interests: Optional[List[str]] = None
     childId: Optional[int] = Field(default=None, validation_alias=AliasChoices('childId', 'child_id'))
     limit: int = 5
+    random: bool = False # [2025-11-12 김광현] 랜덤 플래그 추가
 
 
 class Choice(BaseModel):
@@ -190,12 +191,27 @@ def _scene_from_payload(payload: Dict[str, Any]) -> Scene:
 async def recommend_stories(req: RecommendStoriesRequest):
     logger.info(f"추천 요청: emotion={req.emotion}, interests={req.interests}")
     try:
+        """
+        동화 추천 엔드포인트
+        
+        [2025-11-12 김광현] 랜덤 모드 추가
+        - random=True: Pinecone에서 랜덤 동화 반환
+        - random=False: 감정/관심사 기반 추천 동화 반환
+        """
         if StorySearchService:
             svc = StorySearchService()
-            items = await svc.recommend_stories_async(req.emotion, req.interests or [], req.childId, req.limit)
-            logger.info(f"추천 결과 {len(items)}건")
-            # return {"items": items}
-            return items
+
+            # 랜덤 모드
+            if req.random:
+                logger.info(f"랜덤 동화 요청 - limit: {req.limit}")
+                items = await svc.get_random_stories_async(req.limit)
+                return items
+            else:     
+                logger.info(f"cn")
+                items = await svc.recommend_stories_async(req.emotion, req.interests or [], req.childId, req.limit)
+                logger.info(f"추천 결과 {len(items)}건")
+                # return {"items": items}
+                return items
         
         logger.info("StorySearchService 없음 → 폴백 사용")
         samples = [
