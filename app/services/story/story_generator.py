@@ -198,8 +198,48 @@ class StorySearchService:
     ) -> List[Dict[str, Any]]:
         """
         엔드포인트에서 await 가능하도록 제공하는 async 래퍼.
+
+        [2025-11-12 김광현] AI 줄거리 생성 기능 추가
+        - Pinecone 검색 후 각 동화 제목으로 AI가 줄거리 생성
+        - metadata["ai_summary"]에 저장하여 백엔드로 전달
         """
-        return self.search_stories(emotion, interests, top_k=limit)
+        # 기존 동기 검색 먼저 실행
+        stories = self.search_stories(emotion, interests, top_k=limit)
+
+        # 각 동화에 AI 줄거리 추가 (병렬 처리로 속도 개선)
+        from app.services.llm.openai_service import OpenAIService
+        import asyncio
+
+        openai_service = OpenAIService()
+
+        async def add_ai_summary(story: Dict[str, Any]) -> Dict[str, Any]:
+            """각 동화에 AI 생성 줄거리 추가"""
+            title = story.get("title", "제목 없음")
+            metadata = story.get("metadata", {})
+
+            try:
+                # AI로 줄거리 생성
+                ai_summary = await openai_service.generate_story_summary(title)
+                metadata["ai_summary"] = ai_summary
+                logger.info(f"✅ AI 줄거리 생성: {title[:20]}... → {ai_summary[:30]}...")
+            except Exception as e:
+                logger.warning(f"⚠️ AI 줄거리 생성 실패: {title}, {str(e)}")
+                # 실패 시 plotSummaryText 사용하거나 기본 문구
+                fallback = metadata.get("plotSummaryText") or f"{title}의 이야기예요."
+                metadata["ai_summary"] = fallback
+
+            story["metadata"] = metadata
+            return story
+
+        # 모든 동화에 대해 병렬로 AI 줄거리 생성
+        try:
+            enriched_stories = await asyncio.gather(*[add_ai_summary(s) for s in stories])
+            logger.info(f"✅ {len(enriched_stories)}개 동화에 AI 줄거리 추가 완료")
+            return enriched_stories
+        except Exception as e:
+            logger.error(f"❌ AI 줄거리 일괄 생성 실패: {str(e)}")
+            # 실패해도 원본 stories 반환
+            return stories
 
     def get_story_by_id(self, story_id: str) -> Optional[Dict[str, Any]]:
         if not self.index:
