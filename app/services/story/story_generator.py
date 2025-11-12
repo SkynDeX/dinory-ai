@@ -157,22 +157,26 @@ class StorySearchService:
             matches = getattr(results, "matches", None) or getattr(results, "data", None) or results.get("matches", [])  # type: ignore[attr-defined]
             
             stories: List[Dict[str, Any]] = []
-            seen_ids = set()    # [2025-10-29 김광현] 중복 체크용
+            seen_ids = set()    # [2025-10-29 김광현] ID 중복 체크용
+            seen_titles = set()  # [2025-11-12 추가] 제목 중복 체크용
 
             for m in matches:
                 mid = getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
-
-                # [2025-10-29 김광현] 중복 체크
-                if mid in seen_ids:
-                    continue
-                seen_ids.add(mid)
-
                 score = getattr(m, "score", None) or (m.get("score") if isinstance(m, dict) else 0.0)
                 meta = getattr(m, "metadata", None) or (m.get("metadata") if isinstance(m, dict) else {}) or {}
+                title = meta.get("title", "제목 없음")
+
+                # [2025-11-12 수정] ID와 제목 둘 다 중복 체크
+                if mid in seen_ids or title in seen_titles:
+                    continue
+
+                seen_ids.add(mid)
+                seen_titles.add(title)
+
                 stories.append(
                     {
                         "story_id": mid,
-                        "title": meta.get("title", "제목 없음"),
+                        "title": title,
                         "matching_score": int(float(score) * 100),
                         "metadata": meta,
                     }
@@ -182,7 +186,7 @@ class StorySearchService:
                 if len(stories) >= top_k:
                     break
 
-            logger.info(f"Pinecone 검색 결과 (중복 제거 전/후): {len(matches)}/{len(stories)}개")
+            logger.info(f"Pinecone 검색 결과 (ID/제목 중복 제거 전/후): {len(matches)}/{len(stories)}개")
             return self._normalize(stories)
         
         except Exception as e:
@@ -202,9 +206,43 @@ class StorySearchService:
         [2025-11-12 김광현] AI 줄거리 생성 기능 추가
         - Pinecone 검색 후 각 동화 제목으로 AI가 줄거리 생성
         - metadata["ai_summary"]에 저장하여 백엔드로 전달
+
+        [2025-11-12 수정] 이미 읽은 동화 제외
+        - child_id로 완료한 동화 목록 조회
+        - 추천 결과에서 중복 제거
         """
-        # 기존 동기 검색 먼저 실행
-        stories = self.search_stories(emotion, interests, top_k=limit)
+        import httpx
+        import os
+
+        # [2025-11-12 추가] 이미 읽은 동화 ID 목록 가져오기
+        read_story_ids = set()
+        if child_id:
+            try:
+                spring_api_url = os.getenv("SPRING_API_URL", "http://localhost:8090/api")
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(
+                        f"{spring_api_url}/story/completions/child/{child_id}",
+                        params={"limit": 100}
+                    )
+                    if response.status_code == 200:
+                        completions = response.json()
+                        read_story_ids = {str(c.get("storyId")) for c in completions if c.get("storyId")}
+                        logger.info(f"✅ 아이 {child_id}의 읽은 동화 {len(read_story_ids)}개 제외")
+                    else:
+                        logger.warning(f"⚠️ 읽은 동화 목록 조회 실패: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"⚠️ 읽은 동화 목록 조회 실패: {e}")
+
+        # 기존 동기 검색 (더 많이 가져와서 중복 제거 후 limit 맞추기)
+        stories = self.search_stories(emotion, interests, top_k=limit * 3)
+
+        # [2025-11-12 추가] 이미 읽은 동화 제외
+        filtered_stories = [
+            story for story in stories
+            if story.get("storyId") not in read_story_ids
+        ][:limit]  # 필터링 후 limit만큼만
+
+        logger.info(f"📚 전체 추천: {len(stories)}개 → 중복 제거 후: {len(filtered_stories)}개")
 
         # 각 동화에 AI 줄거리 추가 (병렬 처리로 속도 개선)
         from app.services.llm.openai_service import OpenAIService
@@ -231,15 +269,15 @@ class StorySearchService:
             story["metadata"] = metadata
             return story
 
-        # 모든 동화에 대해 병렬로 AI 줄거리 생성
+        # 모든 동화에 대해 병렬로 AI 줄거리 생성 (필터링된 동화만)
         try:
-            enriched_stories = await asyncio.gather(*[add_ai_summary(s) for s in stories])
+            enriched_stories = await asyncio.gather(*[add_ai_summary(s) for s in filtered_stories])
             logger.info(f"✅ {len(enriched_stories)}개 동화에 AI 줄거리 추가 완료")
             return enriched_stories
         except Exception as e:
             logger.error(f"❌ AI 줄거리 일괄 생성 실패: {str(e)}")
-            # 실패해도 원본 stories 반환
-            return stories
+            # 실패해도 필터링된 stories 반환
+            return filtered_stories
 
     def get_story_by_id(self, story_id: str) -> Optional[Dict[str, Any]]:
         if not self.index:

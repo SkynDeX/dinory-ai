@@ -43,12 +43,6 @@ class ChatbotServiceWithRAG:
 6. 안전하고 건전한 대화를 유지하세요
 7. 짧고 간결하게 대화하세요 (1-3문장)
 
-**[2025-11-11 추가] 동화 추천 요청 감지:**
-- 아이가 동화를 추천해달라는 요청을 하면 (예: "동화 추천해줘", "다른 동화 알려줘", "새로운 이야기 읽고 싶어", "추천해줘" 등)
-- 응답의 **맨 앞에** 정확히 "[RECOMMEND_STORY]" 키워드를 포함하세요
-- 예시 응답: "[RECOMMEND_STORY] 동화를 추천해줄게!"
-- **중요**: 다른 일반 대화에서는 절대 이 키워드를 사용하지 마세요
-
 **[2025-11-07 추가] 디노의 감정 상태에 따른 말투 변화:**
 - 현재 디노의 감정 상태는 대화 맥락에 따라 자동으로 결정됩니다.
 - 감정별 말투 가이드:
@@ -487,6 +481,18 @@ JSON 형식으로만 응답하세요:
             print(f"★ [BuildPrompt] ⚠️ RAG 메모리 비활성화 (use_memory={self.use_memory}, child_id={child_id})")
 
         # 3. 통합 프롬프트 생성
+        # [2025-11-12 수정] 동화 후기 모드일 때 [RECOMMEND_STORY] 지시사항 추가
+        recommend_instruction = ""
+        if session_id in self.story_context:
+            recommend_instruction = """
+
+**[동화 추천 요청 감지]:**
+- 아이가 동화를 추천해달라는 요청을 하면 (예: "동화 추천해줘", "다른 동화 알려줘", "새로운 이야기 읽고 싶어" 등)
+- 응답의 **맨 앞에** 정확히 "[RECOMMEND_STORY]" 키워드를 포함하세요
+- 예시 응답: "[RECOMMEND_STORY] 동화를 추천해줄게!"
+- **중요**: 동화 추천 요청이 아닌 일반 대화에서는 절대 이 키워드를 사용하지 마세요
+"""
+
         enhanced_prompt = f"""
 {base_prompt}
 {emotion_instruction}
@@ -494,6 +500,7 @@ JSON 형식으로만 응답하세요:
 {story_context_text}
 
 {memory_context_text}
+{recommend_instruction}
 
 **대화 가이드라인:**
 1. 반말로 친근하게 대화하세요 (예: "~야", "~니?", "~어")
@@ -518,6 +525,12 @@ JSON 형식으로만 응답하세요:
                 print(f"★ [BuildPrompt] ✅ Pinecone 시맨틱 검색 결과 포함 (이름/과거 대화 참조 가능)")
         else:
             print(f"★ [BuildPrompt] ❌ 프롬프트에 'RAG 메모리' 없음!")
+
+        # [2025-11-12 추가] RECOMMEND_STORY 지시사항 포함 여부 로그
+        if "[동화 추천 요청 감지]" in enhanced_prompt:
+            print(f"★ [BuildPrompt] ✅ 프롬프트에 '[RECOMMEND_STORY]' 지시사항 포함 (동화 후기 모드)")
+        else:
+            print(f"★ [BuildPrompt] ⚠️ 프롬프트에 '[RECOMMEND_STORY]' 지시사항 없음 (일상 대화 모드)")
 
         return enhanced_prompt
 
@@ -591,7 +604,12 @@ JSON 형식으로만 응답하세요:
   * 요약하지 말고 원문 그대로 전달하세요
   * "자세히 보려고 노력하는 장면" 같은 추상적인 설명 대신, 실제 content를 그대로 읽어주세요
 - 동화 내용과 연관지어 대화하세요
-- 아이가 "동화 추천해줘", "다른 동화 알려줘" 같은 요청을 하면, 동화 추천 의도를 감지하고 추천해주세요
+
+**[2025-11-12 추가] 동화 추천 요청 감지 (동화 후기 모드 전용):**
+- 아이가 동화를 추천해달라는 요청을 하면 (예: "동화 추천해줘", "다른 동화 알려줘", "새로운 이야기 읽고 싶어" 등)
+- 응답의 **맨 앞에** 정확히 "[RECOMMEND_STORY]" 키워드를 포함하세요
+- 예시 응답: "[RECOMMEND_STORY] 동화를 추천해줄게!"
+- **중요**: 동화 추천 요청이 아닌 일반 대화에서는 절대 이 키워드를 사용하지 마세요
 
 **대화 가이드라인:**
 1. 반말로 친근하게 대화하세요 (예: "{child_name}야", "어땠어?", "재미있었니?")
