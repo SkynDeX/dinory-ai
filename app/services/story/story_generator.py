@@ -256,16 +256,23 @@ class StorySearchService:
             metadata = story.get("metadata", {})
 
             try:
-                # AI로 줄거리 생성
-                ai_summary = await openai_service.generate_story_summary(title)
+                # [2025-11-12 김광현] AI로 줄거리 생성 (타임아웃 5초)
+                import asyncio
+                ai_summary = await asyncio.wait_for(
+                    openai_service.generate_story_summary(title),
+                    timeout=5.0
+                )
                 metadata["ai_summary"] = ai_summary
                 logger.info(f"✅ AI 줄거리 생성: {title[:20]}... → {ai_summary[:30]}...")
+            except asyncio.TimeoutError:
+                logger.warning(f"⏱️ AI 줄거리 생성 타임아웃: {title}")
+                fallback = metadata.get("plotSummaryText", "")[:60] or f"{title}의 이야기예요."
+                metadata["ai_summary"] = fallback
             except Exception as e:
                 logger.warning(f"⚠️ AI 줄거리 생성 실패: {title}, {str(e)}")
-                # 실패 시 plotSummaryText 사용하거나 기본 문구
-                fallback = metadata.get("plotSummaryText") or f"{title}의 이야기예요."
+                fallback = metadata.get("plotSummaryText", "")[:60] or f"{title}의 이야기예요."
                 metadata["ai_summary"] = fallback
-
+                
             story["metadata"] = metadata
             return story
 

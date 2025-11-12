@@ -926,7 +926,8 @@ class OpenAIService:
                     }
                 ],
                 temperature=0.7,
-                max_tokens=100
+                max_tokens=100,
+                timeout=5.0
             )
             
             summary = response.choices[0].message.content.strip()
