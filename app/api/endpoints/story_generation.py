@@ -750,6 +750,12 @@ async def create_image_prompt(req: CreateImagePromptRequest):
     """
     logger.info(f"이미지 프롬프트 생성 요청: {req.koreanText[:50]}...")
 
+    # [2025-11-13 수정] 동화 내용이 너무 길면 앞부분만 사용 (300자 제한)
+    korean_text_for_prompt = req.koreanText
+    if len(korean_text_for_prompt) > 300:
+        korean_text_for_prompt = korean_text_for_prompt[:300]
+        logger.info(f"동화 내용이 너무 길어서 앞부분 300자만 사용: {len(req.koreanText)} → 300자")
+
     try:
         if OpenAIService:
             try:
@@ -772,20 +778,21 @@ async def create_image_prompt(req: CreateImagePromptRequest):
                 다음 한글 동화 내용을 이미지 생성 AI(PollinationAI)가 이해할 수 있는 짧고 효과적인 영어 프롬프트로 변환해주세요.
 
                 **한글 동화 내용:**
-                {req.koreanText}
+                {korean_text_for_prompt}
 {character_info}
 
 **요구사항:**
-1. 핵심 시각적 요소만 추출 (캐릭터, 배경, 분위기, 행동)
+1. **핵심 시각적 요소만 추출** (캐릭터, 배경, 분위기, 행동) - 긴 내용은 핵심 장면만 선택
 2. 최대 {req.maxLength}자 이내의 영어로 작성
-3. **필수 스타일**: 반드시 "consistent anime art style, Studio Ghibli inspired, kawaii" 포함
-4. **캐릭터 일관성 (매우 중요)**:
+3. **중요: 내용이 길어도 가장 중요한 1-2개 장면만 선택해서 간결하게 작성**
+4. **필수 스타일**: 반드시 "consistent anime art style, Studio Ghibli inspired, kawaii" 포함
+5. **캐릭터 일관성 (매우 중요)**:
    - 주인공 캐릭터는 매번 동일하게 묘사: "same character design"
    - {"제공된 캐릭터 설명을 반드시 그대로 사용: " + req.characterDescription if req.characterDescription else "외모를 구체적으로 고정: a cute child with [구체적 특징]"}
    - 캐릭터의 종류(토끼, 사람, 곰 등)와 외모 특징을 매 장면마다 정확히 동일하게 유지
-5. **금지 사항**: realistic, photorealistic, real photo, 3D render 같은 실사/3D 스타일 절대 사용 금지
-6. **색상 일관성**: "soft pastel color palette, consistent color scheme" 반드시 포함
-7. PollinationAI가 이해하기 쉬운 간결한 문장
+6. **금지 사항**: realistic, photorealistic, real photo, 3D render 같은 실사/3D 스타일 절대 사용 금지
+7. **색상 일관성**: "soft pastel color palette, consistent color scheme" 반드시 포함
+8. PollinationAI가 이해하기 쉬운 간결한 문장
 
 **좋은 예시:**
 - "A cute white rabbit with pink ears walking through a magical forest, consistent anime art style, Studio Ghibli inspired, kawaii, soft pastel colors, same character design"
@@ -851,11 +858,12 @@ async def create_image_prompt(req: CreateImagePromptRequest):
                         logger.warning(f"금지된 키워드 '{keyword}' 제거하고 anime style로 대체")
 
                 # [2025-11-11 수정] 프롬프트 길이 제한 완화 - 필수 키워드 추가 후에는 잘리지 않도록
-                # Pollinations AI는 긴 프롬프트도 잘 처리하므로 여유있게 설정
-                max_allowed_length = max(req.maxLength, len(image_prompt))  # 필수 키워드 추가 후 길이가 maxLength를 초과해도 허용
-                if len(image_prompt) > max_allowed_length + 100:  # 너무 길면 (maxLength + 100자 초과) 잘라냄
-                    image_prompt = image_prompt[:max_allowed_length + 100].rsplit(' ', 1)[0]
-                    logger.warning(f"프롬프트가 너무 길어서 잘림: {len(image_prompt)} → {max_allowed_length + 100}자")
+                # [2025-11-13 수정] 프롬프트 길이 제한 강화 - 너무 길면 이미지 생성 실패
+                # Pollinations AI: 최대 500자 권장, 초과 시 실패 가능성 높음
+                max_allowed_length = min(req.maxLength + 150, 500)  # 최대 500자로 제한
+                if len(image_prompt) > max_allowed_length:
+                    image_prompt = image_prompt[:max_allowed_length].rsplit(' ', 1)[0]
+                    logger.warning(f"프롬프트가 너무 길어서 잘림: {len(image_prompt)} → {max_allowed_length}자")
 
                 logger.info(f"프롬프트 생성 완료: {image_prompt}")
 
@@ -872,12 +880,13 @@ async def create_image_prompt(req: CreateImagePromptRequest):
 
         # [2025-11-05 김민중 수정] 폴백 프롬프트에 캐릭터 일관성 키워드 추가
         # [2025-11-05 추가] storyId로 캐릭터 설명 조회 또는 제공된 characterDescription 사용
+        # [2025-11-13 수정] 긴 내용은 앞부분만 사용
         character_description = req.characterDescription
         if not character_description and req.storyId:
             character_description = CHARACTER_DESCRIPTIONS.get(req.storyId)
 
         character_part = character_description if character_description else "A cute child character"
-        fallback_prompt = f"{character_part}, consistent anime art style, Studio Ghibli inspired, same character design, kawaii, soft pastel color palette, warm and friendly atmosphere, {req.koreanText[:20]}"
+        fallback_prompt = f"{character_part}, consistent anime art style, Studio Ghibli inspired, same character design, kawaii, soft pastel color palette, warm and friendly atmosphere, {korean_text_for_prompt[:20]}"
         if len(fallback_prompt) > req.maxLength:
             fallback_prompt = fallback_prompt[:req.maxLength].rsplit(' ', 1)[0]
 
@@ -891,7 +900,32 @@ async def create_image_prompt(req: CreateImagePromptRequest):
 
     except Exception as e:
         logger.error(f"create-image-prompt 실패: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # [2025-11-13 수정] 에러 발생 시에도 기본 프롬프트 반환 (이미지 생성 실패 방지)
+        try:
+            korean_text_for_prompt = req.koreanText[:300] if len(req.koreanText) > 300 else req.koreanText
+            character_description = req.characterDescription
+            if not character_description and req.storyId:
+                character_description = CHARACTER_DESCRIPTIONS.get(req.storyId)
+
+            character_part = character_description if character_description else "A cute child character"
+            fallback_prompt = f"{character_part}, consistent anime art style, Studio Ghibli inspired, kawaii, soft pastel colors, warm atmosphere"
+
+            logger.warning(f"에러 발생으로 기본 프롬프트 반환: {fallback_prompt}")
+            return {
+                "imagePrompt": fallback_prompt,
+                "keyElements": ["children's book", "illustration", "anime style"],
+                "originalLength": len(req.koreanText),
+                "promptLength": len(fallback_prompt)
+            }
+        except:
+            # 폴백도 실패하면 최종 기본값
+            default_prompt = "A cute child character, children's book illustration style, Studio Ghibli inspired, kawaii, soft pastel colors"
+            return {
+                "imagePrompt": default_prompt,
+                "keyElements": ["children's book"],
+                "originalLength": 0,
+                "promptLength": len(default_prompt)
+            }
 
 
 @router.get("/health")
