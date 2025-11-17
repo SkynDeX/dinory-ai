@@ -166,26 +166,32 @@ class ChatbotServiceWithRAG:
                 message
             )
 
-            # [2025-11-12 수정] 감정 회복 로직: 조건부로 neutral 전환
+            # [2025-11-14 수정] 감정 회복 로직: AI 기반 부정적 표현 감지
             if not asking_dino_state and dino_emotion in ["angry", "sad"]:
-                # 최근 대화에 부정적인 내용이 많으면 유지
+                # 최근 대화 분석
                 recent_msgs = self.conversation_history.get(session_id, [])[-6:]  # 최근 3왕복
-                negative_keywords = ["멍청", "바보", "싫어", "짜증", "꺼져", "시끄", "닥쳐", "죽어", "욕", "나쁜", "못생긴", "어리석", "쓰레기", "한심", "쪽팔", "창피", "쓸모없", "재미없", "지겨", "귀찮", "피곤", "따분"]
                 negative_count = 0
-                for msg in recent_msgs:
-                    if msg.get("role") == "user":
-                        content = msg.get("content", "").lower()
-                        for keyword in negative_keywords:
-                            if keyword in content:
-                                negative_count += 1
-                                break
+                last_message_negative = False
 
-                if negative_count >= 2:
-                    # 최근에 부정적인 메시지가 2개 이상이면 감정 유지
-                    print(f"⚠️ [감정 유지] 최근 부정적 메시지 {negative_count}개 → {dino_emotion} 유지")
+                # AI로 각 메시지가 부정적인지 판별
+                for i, msg in enumerate(recent_msgs):
+                    if msg.get("role") == "user":
+                        content = msg.get("content", "")
+                        is_negative = await self._is_negative_message(content)
+
+                        if is_negative:
+                            negative_count += 1
+                            # 가장 마지막 사용자 메시지인지 확인
+                            if i == len(recent_msgs) - 1 or (i == len(recent_msgs) - 2 and recent_msgs[-1].get("role") == "assistant"):
+                                last_message_negative = True
+                            print(f"🔴 부정적 메시지 감지: '{content}'")
+
+                # 가장 최근 메시지가 부정적이거나, 최근 대화에 부정적 메시지가 1개 이상이면 감정 유지
+                if last_message_negative or negative_count >= 1:
+                    print(f"⚠️ [감정 유지] 부정적 메시지 감지 (count={negative_count}, last_negative={last_message_negative}) → {dino_emotion} 유지")
                 else:
                     # 진짜 긍정적인 대화로 전환되었으면 감정 리셋
-                    print(f"🔄 [감정 회복] 새로운 대화 주제 감지 → {dino_emotion} → neutral")
+                    print(f"🔄 [감정 회복] 긍정적인 대화로 전환 → {dino_emotion} → neutral")
                     dino_emotion = "neutral"
 
             print(f"🎭 디노 감정 상태: {dino_emotion}")
@@ -972,3 +978,55 @@ JSON 형식으로만 응답하세요:
                 "choices": ["더 알려줘", "다른 이야기"],
                 "emotion": "neutral"
             }
+
+    async def _is_negative_message(self, message: str) -> bool:
+        """
+        [2025-11-14 추가] AI로 메시지가 부정적/욕설인지 판별
+        키워드 리스트 대신 AI를 사용해서 모든 욕설/비속어/부정적 표현 감지
+        """
+        try:
+            prompt = f"""다음 메시지가 욕설, 비속어, 또는 부정적인 표현을 포함하는지 판단해주세요.
+
+메시지: "{message}"
+
+판단 기준:
+- 욕설, 비속어, 은어 (예: ㅈ까, ㅂㅅ, 시발, 병신, 개새끼 등)
+- 상대방을 무시하거나 모욕하는 표현 (예: 멍청해, 바보, 재미없어, 쓸모없어)
+- 공격적이거나 적대적인 표현 (예: 꺼져, 싫어, 짜증나, 닥쳐)
+- 부정적인 감정 표현 (예: 지겨워, 따분해, 귀찮아)
+
+긍정적이거나 중립적인 일반 대화는 false로 판단하세요.
+
+응답 형식 (JSON):
+{{
+    "is_negative": true/false,
+    "reason": "판단 근거"
+}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "당신은 메시지의 부정성을 판별하는 전문가입니다. JSON 형식으로만 응답하세요."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,  # 일관성 있는 판단을 위해 낮게 설정
+                max_tokens=100,
+                response_format={"type": "json_object"}
+            )
+
+            import json
+            result = json.loads(response.choices[0].message.content)
+            is_negative = result.get("is_negative", False)
+            reason = result.get("reason", "")
+
+            if is_negative:
+                print(f"🔴 AI 판별 결과: 부정적 메시지 - {reason}")
+            else:
+                print(f"🟢 AI 판별 결과: 긍정적/중립 메시지")
+
+            return is_negative
+
+        except Exception as e:
+            print(f"⚠️ _is_negative_message 에러: {e}")
+            # 에러 시 안전하게 false 반환 (감정 유지하지 않음)
+            return False
