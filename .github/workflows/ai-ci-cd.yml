@@ -93,7 +93,7 @@ jobs:
             cd /home/${{ secrets.AI_SERVER_USERNAME }}/dinory
 
             # 최신 이미지 pull (docker-compose v1)
-            docker pull ${{ secrets.DOCKER_USERNAME }}/dinory-frontend:latest
+            docker pull ${{ secrets.DOCKER_USERNAME }}/dinory-ai:latest
 
             # 기존 컨테이너 중지 및 제거
             docker-compose -f docker-compose.instance2.yml stop ai-server 2>/dev/null || true
