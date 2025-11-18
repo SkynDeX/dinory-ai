@@ -64,9 +64,10 @@ class ChatbotService:
 
         # OpenAI API 호출
         try:
-            # [2025-11-05 추가] story_context가 없으면 백엔드에서 로드 시도
-            if session_id not in self.story_context:
-                await self._load_story_context_from_backend(session_id)
+            # [2025-11-17 수정] 항상 최신 story_context 로드 (동화 변경 감지)
+            # - 사용자가 새로운 동화를 읽으면 storyCompletionId가 업데이트됨
+            # - 캐시된 정보를 사용하지 않고 항상 최신 정보를 로드
+            await self._load_story_context_from_backend(session_id)
 
             # 동화 컨텍스트가 있으면 시스템 프롬프트에 추가
             system_prompt = self.system_prompt
