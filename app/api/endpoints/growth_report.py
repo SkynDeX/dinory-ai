@@ -392,30 +392,62 @@ async def generate_strength_descriptions(req: GrowthReportRequest):
             score = strength_info.get("score", 0)
             examples = strength_info.get("examples", [])  # 배열로 받기
 
+            examples_text = ""
+            if examples:
+                examples_text = "\n\n**아이가 선택한 예시**:\n" + "\n".join([f"- {ex}" for ex in examples[:3]])
+
             prompt = f"""
-아이가 {area_name} 능력에서 {score}점을 기록하며 뛰어난 모습을 보였습니다.
-{f"예시: {', '.join(examples)}" if examples else ""}
+아이의 {area_name} 능력(현재 {score}점)이 다른 능력에 비해 상대적으로 높은 점수입니다.{examples_text}
 
-이 강점을 부모에게 보고하는 설명을 작성해주세요.
-
-다음 JSON 형식으로만 응답하세요:
+위 예시들을 **반드시 분석**하여 부모에게 전달할 내용을 다음 JSON 형식으로 작성하세요:
 {{
-  "description": "{area_name}의 의미를 쉽게 설명하고, 아이의 강점을 3인칭으로 설명 (예: 아이는, 아이의) 40자 이내"
+  "description": "150-200자 분량의 구체적이고 따뜻한 분석"
 }}
 
-조건:
-1. 부모에게 보고하는 형식 (3인칭: 아이는, 아이의)
-2. 아이의 성취를 구체적으로 칭찬
-3. {area_name} 능력의 의미를 쉽게 풀어서 설명
-4. 따뜻하고 격려하는 어조
+**description 작성 필수 절차 (4단계, 반드시 모두 포함)**:
+
+1단계 - **예시 패턴 분석** (50자):
+위 예시들에서 아이가 선택한 행동들을 분석하여, {area_name}과 관련된 공통 패턴을 찾아 "아이가 선택한 예시들은 ..."으로 시작하여 설명하세요.
+
+2단계 - **구체적 상황 설명** (40자):
+어떤 상황에서 {area_name} 능력이 발휘되었는지 동화 속 맥락과 함께 설명하세요.
+
+3단계 - **성장 의미 강조** (40자):
+이 강점이 아이의 전반적인 발달(사회성, 정서, 학습 등)에 어떻게 도움이 되는지 설명하세요.
+
+4단계 - **발전 방향 제시** (30자):
+이 강점을 더 발전시키기 위한 간단한 방향을 제시하세요.
+
+**중요**:
+- 반드시 150자 이상 작성
+- 예시 내용을 구체적으로 언급
+- "아이는~", "아이의~" 3인칭 사용
+- 따뜻하고 격려하는 전문가 톤
+
+**좋은 예시**:
+"아이가 선택한 예시들은 친구들에게 함께 하자고 제안하거나 기쁨을 나누는 긍정적 사회적 상호작용을 보여줍니다. '별빛 속으로 떠나는 여행'에서 친구들에게 함께 놀자고 제안하는 등 주도적으로 관계를 형성하는 모습이 돋보입니다. 이러한 능력은 사회적 유대감과 협력 능력을 키우는 데 중요한 역할을 합니다. 앞으로도 다양한 상황에서 친구들과 교류할 기회를 많이 제공하면 더욱 성장할 수 있을 거예요."
+
+**나쁜 예시**:
+"{area_name} 능력이 뛰어나요."
+"아이의 창의적 사고가 돋보입니다."
 """
 
             try:
                 response = llm.client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {
+                            "role":"system",
+                            "content": "당신은 아동 발달 전문가입니다. 부모에게 아이의 강점을 구체적이고 따뜻하게 설명하는 것이 목표입니다. 반드시 150자 이상의 상세한 분석을 제공해야 합니다."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
                     response_format={"type": "json_object"},
-                    temperature=0.7
+                    temperature=0.8,
+                    max_tokens=500
                 )
 
                 result = json.loads(response.choices[0].message.content)
